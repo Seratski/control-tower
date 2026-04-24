@@ -8,7 +8,8 @@ import {
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
   subscribeSkills, subscribeAgents, subscribeTimeline, subscribeUsers,
-  toggleAgentSkill, updateSkillTarget, createAgent, updateAgent, deleteAgent,
+  toggleAgentSkill, updateSkillTarget, createSkill, updateSkill, deleteSkill,
+  createAgent, updateAgent, deleteAgent,
   addTimelineEvent, deleteTimelineEvent, deleteUser,
 } from './lib/data.js';
 
@@ -342,7 +343,11 @@ function Dashboard({ session, onLogout }) {
           />
         )}
         {view === 'skill' && !selectedSkill && (
-          <SkillListView skillStats={skillStats} setSelectedSkill={setSelectedSkill} />
+          <SkillListView
+            skillStats={skillStats} setSelectedSkill={setSelectedSkill}
+            isAdmin={isAdmin}
+            onManageSkills={() => setModal({ type: 'manageSkills' })}
+          />
         )}
         {view === 'skill' && selectedSkill && (
           <SkillDetailView
@@ -371,6 +376,12 @@ function Dashboard({ session, onLogout }) {
       )}
       {modal?.type === 'agent' && (
         <NewAgentModal session={session} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'manageSkills' && (
+        <ManageSkillsModal
+          skills={skills} skillStats={skillStats}
+          onClose={() => setModal(null)}
+        />
       )}
 
       <footer style={{
@@ -763,16 +774,28 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
 }
 
 // ============ SKILL LIST ============
-function SkillListView({ skillStats, setSelectedSkill }) {
+function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }) {
   return (
     <div>
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
-          All Skills · {skillStats.length} paths
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            All Skills · {skillStats.length} paths
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+            Skill <span style={{ color: BRAND.orange }}>paths</span>
+          </h2>
         </div>
-        <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
-          Skill <span style={{ color: BRAND.orange }}>paths</span>
-        </h2>
+        {isAdmin && (
+          <button onClick={onManageSkills} style={{
+            background: BRAND.orange, color: BRAND.black, border: 'none',
+            padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px',
+            textTransform: 'uppercase', letterSpacing: '0.1em',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}>
+            <Settings size={14} /> Manage skills
+          </button>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
@@ -807,6 +830,11 @@ function SkillListView({ skillStats, setSelectedSkill }) {
           );
         })}
       </div>
+      {skillStats.length === 0 && (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
+          No skills defined yet. {isAdmin && 'Click "Manage skills" to create the first one.'}
+        </div>
+      )}
     </div>
   );
 }
@@ -1281,10 +1309,258 @@ function NewAgentModal({ session, onClose }) {
   );
 }
 
-function ModalShell({ children, onClose }) {
+// ============ MANAGE SKILLS MODAL (new!) ============
+function ManageSkillsModal({ skills, skillStats, onClose }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState({ name: '', description: '', targetVolumePct: 0, order: 99 });
+  const [error, setError] = useState('');
+
+  const startEdit = (skill) => {
+    setEditingId(skill.id);
+    setEditForm({
+      name: skill.name,
+      description: skill.description,
+      targetVolumePct: skill.targetVolumePct,
+      order: skill.order,
+    });
+  };
+
+  const saveEdit = async () => {
+    setError('');
+    try {
+      await updateSkill(editingId, editForm);
+      setEditingId(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDelete = async (skill) => {
+    const stats = skillStats.find(s => s.id === skill.id);
+    if (stats && stats.agentCount > 0) {
+      alert(`Cannot delete: ${stats.agentCount} agent(s) are currently assigned to "${skill.name}". Remove these assignments first.`);
+      return;
+    }
+    if (confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) {
+      try {
+        await deleteSkill(skill.id);
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!newForm.name.trim()) {
+      setError('Name is required');
+      return;
+    }
+    try {
+      const maxOrder = Math.max(0, ...skills.map(s => s.order || 0));
+      await createSkill({ ...newForm, order: newForm.order || maxOrder + 1 });
+      setNewForm({ name: '', description: '', targetVolumePct: 0, order: 99 });
+      setShowNew(false);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: BRAND.grey, padding: '32px', maxWidth: '500px', width: '90%', border: `2px solid ${BRAND.orange}`, maxHeight: '90vh', overflowY: 'auto' }}>
+    <ModalShell onClose={onClose} wide>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Manage skills</h3>
+        <button onClick={onClose} style={{
+          background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px',
+        }}>
+          <X size={18} />
+        </button>
+      </div>
+
+      {!showNew && (
+        <button onClick={() => setShowNew(true)} style={{
+          background: BRAND.orange, color: BRAND.black, border: 'none',
+          padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px',
+          textTransform: 'uppercase', letterSpacing: '0.1em',
+          display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px',
+        }}>
+          <Plus size={14} /> New skill
+        </button>
+      )}
+
+      {showNew && (
+        <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
+          <h4 className="display-font" style={{ margin: '0 0 12px', fontSize: '16px' }}>Create new skill</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+            <div>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Name *</label>
+              <input required value={newForm.name} onChange={(e) => setNewForm({...newForm, name: e.target.value})}
+                placeholder="e.g. Warranty"
+                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Target %</label>
+              <input type="number" min="0" max="100" value={newForm.targetVolumePct}
+                onChange={(e) => setNewForm({...newForm, targetVolumePct: e.target.value})}
+                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Order</label>
+              <input type="number" min="1" value={newForm.order}
+                onChange={(e) => setNewForm({...newForm, order: e.target.value})}
+                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+            </div>
+          </div>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Description</label>
+            <input value={newForm.description} onChange={(e) => setNewForm({...newForm, description: e.target.value})}
+              placeholder="Short description of the skill"
+              style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="submit" style={{
+              background: BRAND.orange, color: BRAND.black, border: 'none',
+              padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px',
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+            }}>Create</button>
+            <button type="button" onClick={() => { setShowNew(false); setError(''); }} style={{
+              background: 'transparent', border: `1px solid #555`, color: BRAND.white,
+              padding: '8px 16px', cursor: 'pointer', fontSize: '12px',
+            }}>Cancel</button>
+          </div>
+        </form>
+      )}
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
+
+      {/* Skills list */}
+      <div style={{ background: BRAND.black, border: `1px solid #333` }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ background: '#1a1a1a' }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Order</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Description</th>
+              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Target</th>
+              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Agents</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {skills.map(s => {
+              const stats = skillStats.find(ss => ss.id === s.id);
+              const agentCount = stats ? stats.agentCount : 0;
+              const isEditing = editingId === s.id;
+
+              if (isEditing) {
+                return (
+                  <tr key={s.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
+                    <td style={{ padding: '8px 12px' }}>
+                      <input type="number" min="1" value={editForm.order}
+                        onChange={(e) => setEditForm({...editForm, order: e.target.value})}
+                        style={{ width: '60px', padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <input value={editForm.name}
+                        onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <input value={editForm.description}
+                        onChange={(e) => setEditForm({...editForm, description: e.target.value})}
+                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <input type="number" min="0" max="100" value={editForm.targetVolumePct}
+                        onChange={(e) => setEditForm({...editForm, targetVolumePct: e.target.value})}
+                        style={{ width: '60px', padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', textAlign: 'center' }} />
+                    </td>
+                    <td style={{ padding: '8px 12px', textAlign: 'center', color: '#999' }}>{agentCount}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                      <button onClick={saveEdit} style={{
+                        background: BRAND.orange, color: BRAND.black, border: 'none',
+                        padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700,
+                        textTransform: 'uppercase', marginRight: '4px',
+                      }}>Save</button>
+                      <button onClick={() => setEditingId(null)} style={{
+                        background: 'transparent', border: `1px solid #555`, color: BRAND.white,
+                        padding: '4px 10px', cursor: 'pointer', fontSize: '10px',
+                      }}>Cancel</button>
+                    </td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr key={s.id} style={{ borderTop: `1px solid #333` }}>
+                  <td style={{ padding: '10px 12px', color: '#999', fontWeight: 700 }}>{s.order}</td>
+                  <td style={{ padding: '10px 12px', fontWeight: 700 }}>{s.name}</td>
+                  <td style={{ padding: '10px 12px', color: '#bbb', fontSize: '12px' }}>{s.description}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'center', color: BRAND.orange, fontWeight: 700 }}>{s.targetVolumePct}%</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'center', color: agentCount > 0 ? BRAND.orange : '#666' }}>{agentCount}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => startEdit(s)} style={{
+                      background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange,
+                      padding: '4px 8px', cursor: 'pointer', fontSize: '10px',
+                      textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, marginRight: '4px',
+                    }}>
+                      <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Edit
+                    </button>
+                    <button onClick={() => handleDelete(s)}
+                      disabled={agentCount > 0}
+                      title={agentCount > 0 ? 'Remove assignments first' : 'Delete skill'}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${agentCount > 0 ? '#444' : BRAND.red}`,
+                        color: agentCount > 0 ? '#444' : BRAND.red,
+                        padding: '4px 8px', cursor: agentCount > 0 ? 'not-allowed' : 'pointer', fontSize: '10px',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700,
+                      }}>
+                      <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {skills.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
+                  No skills yet — click "New skill" to create one
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: '16px', padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.yellow}`, fontSize: '11px', color: '#bbb' }}>
+        <strong style={{ color: BRAND.yellow }}>Note:</strong> Skills that are assigned to agents cannot be deleted. Remove all agent assignments first (via Skill View or Skill Matrix).
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={{
+          background: BRAND.orange, color: BRAND.black, border: 'none',
+          padding: '10px 20px', cursor: 'pointer', fontWeight: 700,
+          textTransform: 'uppercase', fontSize: '12px',
+        }}>Done</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ModalShell({ children, onClose, wide }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: '20px' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: BRAND.grey, padding: '32px',
+        maxWidth: wide ? '900px' : '500px',
+        width: '100%',
+        border: `2px solid ${BRAND.orange}`,
+        maxHeight: '90vh', overflowY: 'auto',
+      }}>
         {children}
       </div>
     </div>
