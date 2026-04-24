@@ -19,7 +19,6 @@ export async function updateSkillTarget(skillId, targetVolumePct) {
 }
 
 export async function createSkill({ name, description, targetVolumePct, order }) {
-  // Generate a clean ID from name: "After Sales" -> "s_after_sales"
   const cleanId = 's_' + name.toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
@@ -64,7 +63,8 @@ export async function toggleAgentSkill(agentId, skillId, skillName, assign, acto
   await addTimelineEvent(agentId, {
     type: 'skill',
     title: assign ? `${skillName} skill assigned` : `${skillName} skill removed`,
-    note: assign ? `Assigned by ${actorName}` : `Removed by ${actorName}`,
+    note: '',
+    createdBy: actorName,
   });
 }
 
@@ -82,7 +82,8 @@ export async function createAgent({ name, market, startDate, status, actorName }
   await addTimelineEvent(ref.id, {
     type: 'onboarding',
     title: 'Agent profile created',
-    note: `Created by ${actorName}`,
+    note: '',
+    createdBy: actorName,
   });
   return ref.id;
 }
@@ -106,12 +107,13 @@ export function subscribeTimeline(agentId, callback) {
   });
 }
 
-export async function addTimelineEvent(agentId, { type, title, note, date }) {
+export async function addTimelineEvent(agentId, { type, title, note, date, createdBy }) {
   await addDoc(collection(db, 'agents', agentId, 'timeline'), {
     type,
     title,
     note: note || '',
     date: date || new Date().toISOString().split('T')[0],
+    createdBy: createdBy || 'System',
     createdAt: serverTimestamp(),
   });
 }

@@ -3,7 +3,7 @@ import {
   Users, Target, Calendar, Edit3, Plus, X, Check,
   AlertCircle, ChevronRight, Clock, Award, MessageSquare,
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
-  Activity, LogOut, Lock, Trash2, UserPlus, Settings,
+  Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
@@ -287,7 +287,8 @@ function Dashboard({ session, onLogout }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '4px', marginTop: '20px', borderBottom: `1px solid ${BRAND.grey}`, overflowX: 'auto' }}>
+        {/* Tabs — wrap instead of scroll, tighter padding */}
+        <div style={{ display: 'flex', gap: '2px', marginTop: '20px', borderBottom: `1px solid ${BRAND.grey}`, flexWrap: 'wrap' }}>
           {[
             { id: 'overview', label: 'Overview', icon: BarChart3 },
             { id: 'agent', label: 'Agent View', icon: Users },
@@ -304,13 +305,12 @@ function Dashboard({ session, onLogout }) {
                 style={{
                   background: 'transparent', color: active ? BRAND.orange : '#999',
                   border: 'none', borderBottom: `3px solid ${active ? BRAND.orange : 'transparent'}`,
-                  padding: '12px 18px', cursor: 'pointer', fontWeight: 700, fontSize: '13px',
+                  padding: '12px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px',
                   textTransform: 'uppercase', letterSpacing: '0.05em',
-                  display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '-1px',
-                  whiteSpace: 'nowrap',
+                  display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px',
                 }}
               >
-                <Icon size={16} /> {tab.label}
+                <Icon size={15} /> {tab.label}
               </button>
             );
           })}
@@ -755,8 +755,16 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
                           "{event.note}"
                         </div>
                       )}
-                      <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', color, marginTop: '6px', fontWeight: 700 }}>
-                        {event.type}
+                      {/* Footer: type badge + actor */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px' }}>
+                        <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', color, fontWeight: 700 }}>
+                          {event.type}
+                        </div>
+                        {event.createdBy && (
+                          <div style={{ fontSize: '10px', color: '#888', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <User size={9} /> by <span style={{ color: BRAND.orange, fontWeight: 700 }}>{event.createdBy}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1225,6 +1233,7 @@ function CommentModal({ agentId, session, onClose }) {
     };
     await addTimelineEvent(agentId, {
       type, title: titles[type] || 'Note', note: text, date,
+      createdBy: session.displayName,
     });
     onClose();
   };
@@ -1309,7 +1318,7 @@ function NewAgentModal({ session, onClose }) {
   );
 }
 
-// ============ MANAGE SKILLS MODAL (new!) ============
+// ============ MANAGE SKILLS MODAL ============
 function ManageSkillsModal({ skills, skillStats, onClose }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -1436,7 +1445,6 @@ function ManageSkillsModal({ skills, skillStats, onClose }) {
 
       {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
 
-      {/* Skills list */}
       <div style={{ background: BRAND.black, border: `1px solid #333` }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
