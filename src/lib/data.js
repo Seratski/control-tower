@@ -2,7 +2,7 @@
 import {
   collection, doc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc,
   setDoc, query, orderBy, serverTimestamp, arrayUnion, arrayRemove, getDoc,
-  where,
+  where, writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase.js';
 
@@ -21,12 +21,10 @@ export async function updateSkillTarget(skillId, targetVolumePct) {
 
 export async function createSkill({ name, description, targetVolumePct, order }) {
   const cleanId = 's_' + name.toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'skills', finalId), {
-    name: name.trim(),
-    description: description.trim(),
+    name: name.trim(), description: description.trim(),
     targetVolumePct: parseInt(targetVolumePct) || 0,
     order: parseInt(order) || 99,
     createdAt: serverTimestamp(),
@@ -51,19 +49,16 @@ export async function deleteSkill(skillId) {
 export function subscribeTeams(callback) {
   const q = query(collection(db, 'teams'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => {
-    const teams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    callback(teams);
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   });
 }
 
 export async function createTeam({ name, market }) {
   const cleanId = 't_' + name.toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'teams', finalId), {
-    name: name.trim(),
-    market,
+    name: name.trim(), market,
     createdAt: serverTimestamp(),
   });
   return finalId;
@@ -84,19 +79,16 @@ export async function deleteTeam(teamId) {
 export function subscribeTrainers(callback) {
   const q = query(collection(db, 'trainers'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => {
-    const trainers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    callback(trainers);
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   });
 }
 
 export async function createTrainer({ name, market, certifiedSkills }) {
   const cleanId = 'tr_' + name.toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'trainers', finalId), {
-    name: name.trim(),
-    market,
+    name: name.trim(), market,
     certifiedSkills: certifiedSkills || [],
     createdAt: serverTimestamp(),
   });
@@ -125,30 +117,24 @@ export async function toggleTrainerSkill(trainerId, skillId, currentlyCertified)
 export function subscribeAgents(callback) {
   const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => {
-    const agents = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    callback(agents);
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   });
 }
 
 export async function toggleAgentSkill(agentId, skillId, skillName, assign, actorName) {
-  const agentRef = doc(db, 'agents', agentId);
-  await updateDoc(agentRef, {
+  await updateDoc(doc(db, 'agents', agentId), {
     skills: assign ? arrayUnion(skillId) : arrayRemove(skillId),
   });
   await addTimelineEvent(agentId, {
     type: 'skill',
     title: assign ? `${skillName} skill assigned` : `${skillName} skill removed`,
-    note: '',
-    createdBy: actorName,
+    note: '', createdBy: actorName,
   });
 }
 
 export async function createAgent({ name, market, startDate, status, teamId, trainerId, actorName }) {
   const newAgent = {
-    name,
-    market,
-    startDate,
-    status,
+    name, market, startDate, status,
     skills: [],
     teamId: teamId || null,
     trainerId: trainerId || null,
@@ -159,8 +145,7 @@ export async function createAgent({ name, market, startDate, status, teamId, tra
   await addTimelineEvent(ref.id, {
     type: 'onboarding',
     title: 'Agent profile created',
-    note: '',
-    createdBy: actorName,
+    note: '', createdBy: actorName,
   });
   return ref.id;
 }
@@ -174,12 +159,7 @@ export async function changeAgentTeam(agentId, newTeamId, newTeamName, oldTeamNa
   const title = newTeamId
     ? (oldTeamName ? `Team changed: ${oldTeamName} → ${newTeamName}` : `Assigned to team: ${newTeamName}`)
     : `Removed from team: ${oldTeamName || 'Unknown'}`;
-  await addTimelineEvent(agentId, {
-    type: 'comment',
-    title,
-    note: '',
-    createdBy: actorName,
-  });
+  await addTimelineEvent(agentId, { type: 'comment', title, note: '', createdBy: actorName });
 }
 
 export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, oldTrainerName, actorName) {
@@ -187,12 +167,7 @@ export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, 
   const title = newTrainerId
     ? (oldTrainerName ? `Trainer changed: ${oldTrainerName} → ${newTrainerName}` : `Assigned to trainer: ${newTrainerName}`)
     : `Trainer removed: ${oldTrainerName || 'Unknown'}`;
-  await addTimelineEvent(agentId, {
-    type: 'comment',
-    title,
-    note: '',
-    createdBy: actorName,
-  });
+  await addTimelineEvent(agentId, { type: 'comment', title, note: '', createdBy: actorName });
 }
 
 export async function deleteAgent(agentId) {
@@ -201,21 +176,87 @@ export async function deleteAgent(agentId) {
   await deleteDoc(doc(db, 'agents', agentId));
 }
 
+// ============ BULK OPERATIONS (new) ============
+
+/**
+ * Bulk delete agents. Deletes each agent's timeline subcollection first, then the agent.
+ * Firestore's writeBatch is limited to 500 ops; we chunk if needed.
+ */
+export async function bulkDeleteAgents(agentIds) {
+  // Delete timelines in parallel (each agent can have many events)
+  for (const agentId of agentIds) {
+    const timelineSnap = await getDocs(collection(db, 'agents', agentId, 'timeline'));
+    const batch = writeBatch(db);
+    let count = 0;
+    for (const d of timelineSnap.docs) {
+      batch.delete(d.ref);
+      count++;
+      if (count >= 450) { // safety margin below 500
+        await batch.commit();
+        count = 0;
+      }
+    }
+    if (count > 0) await batch.commit();
+    // Delete agent doc itself
+    await deleteDoc(doc(db, 'agents', agentId));
+  }
+}
+
+/**
+ * Bulk assign team. Updates each agent and logs to their timeline.
+ */
+export async function bulkAssignTeam(agentIds, newTeamId, newTeamName, agents, teams, actorName) {
+  for (const agentId of agentIds) {
+    const agent = agents.find(a => a.id === agentId);
+    if (!agent) continue;
+    const oldTeam = teams.find(t => t.id === agent.teamId);
+    const oldTeamName = oldTeam?.name;
+    await updateDoc(doc(db, 'agents', agentId), { teamId: newTeamId || null });
+    const title = newTeamId
+      ? (oldTeamName ? `Team changed: ${oldTeamName} → ${newTeamName}` : `Assigned to team: ${newTeamName}`)
+      : `Removed from team: ${oldTeamName || 'Unknown'}`;
+    await addTimelineEvent(agentId, {
+      type: 'comment',
+      title: `${title} (bulk)`,
+      note: '',
+      createdBy: actorName,
+    });
+  }
+}
+
+/**
+ * Bulk assign trainer.
+ */
+export async function bulkAssignTrainer(agentIds, newTrainerId, newTrainerName, agents, trainers, actorName) {
+  for (const agentId of agentIds) {
+    const agent = agents.find(a => a.id === agentId);
+    if (!agent) continue;
+    const oldTrainer = trainers.find(t => t.id === agent.trainerId);
+    const oldTrainerName = oldTrainer?.name;
+    await updateDoc(doc(db, 'agents', agentId), { trainerId: newTrainerId || null });
+    const title = newTrainerId
+      ? (oldTrainerName ? `Trainer changed: ${oldTrainerName} → ${newTrainerName}` : `Assigned to trainer: ${newTrainerName}`)
+      : `Trainer removed: ${oldTrainerName || 'Unknown'}`;
+    await addTimelineEvent(agentId, {
+      type: 'comment',
+      title: `${title} (bulk)`,
+      note: '',
+      createdBy: actorName,
+    });
+  }
+}
+
 // ============ TIMELINE ============
 export function subscribeTimeline(agentId, callback) {
-  // Sort by createdAt (newest first) for second-precision ordering
   const q = query(collection(db, 'agents', agentId, 'timeline'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snap) => {
-    const events = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    callback(events);
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   });
 }
 
 export async function addTimelineEvent(agentId, { type, title, note, date, createdBy }) {
   await addDoc(collection(db, 'agents', agentId, 'timeline'), {
-    type,
-    title,
-    note: note || '',
+    type, title, note: note || '',
     date: date || new Date().toISOString().split('T')[0],
     createdBy: createdBy || 'System',
     createdAt: serverTimestamp(),
@@ -226,7 +267,7 @@ export async function deleteTimelineEvent(agentId, eventId) {
   await deleteDoc(doc(db, 'agents', agentId, 'timeline', eventId));
 }
 
-// ============ USERS (admin) ============
+// ============ USERS ============
 export function subscribeUsers(callback) {
   return onSnapshot(collection(db, 'users'), (snap) => {
     const users = snap.docs.map(d => {
