@@ -26,7 +26,7 @@ const BRAND = {
 const formatDate = (d) => {
   if (!d) return '';
   const date = new Date(d);
-  return date.toLocaleDateString('da-DK', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 const timelineIcon = (type) => {
@@ -74,7 +74,7 @@ function LoginScreen({ onLogin }) {
       const session = await loginWithPin(username, pin);
       onLogin(session);
     } catch (err) {
-      setError(err.message || 'Login fejlede');
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -110,7 +110,7 @@ function LoginScreen({ onLogin }) {
           </label>
           <input
             type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-            placeholder="fx. mjensen"
+            placeholder="e.g. mjensen"
             autoFocus required
             style={{
               width: '100%', padding: '10px 12px', background: BRAND.black,
@@ -120,7 +120,7 @@ function LoginScreen({ onLogin }) {
           />
 
           <label style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
-            6-cifret PIN
+            6-digit PIN
           </label>
           <input
             type="password" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -151,13 +151,13 @@ function LoginScreen({ onLogin }) {
               fontFamily: 'inherit',
             }}
           >
-            {loading ? 'Logger ind...' : 'Log ind'}
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
         <div style={{ marginTop: '24px', padding: '12px', background: BRAND.black, fontSize: '11px', color: '#999', borderLeft: `3px solid ${BRAND.yellow}` }}>
           <Lock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-          Kontakt din admin hvis du ikke har en PIN endnu.
+          Contact your admin if you don't have a PIN yet.
         </div>
       </div>
     </div>
@@ -173,7 +173,7 @@ function Dashboard({ session, onLogout }) {
   const [selectedSkill, setSelectedSkill] = useState(null);
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
-  const [modal, setModal] = useState(null); // { type: 'comment'|'agent'|'user', ... }
+  const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const isAdmin = session.role === 'admin';
@@ -281,7 +281,7 @@ function Dashboard({ session, onLogout }) {
                 display: 'flex', alignItems: 'center', gap: '6px',
               }}
             >
-              <LogOut size={12} /> Log ud
+              <LogOut size={12} /> Sign out
             </button>
           </div>
         </div>
@@ -334,7 +334,7 @@ function Dashboard({ session, onLogout }) {
             onToggleSkill={handleToggleSkill}
             onAddComment={() => setModal({ type: 'comment', agentId: selectedAgent })}
             onDeleteAgent={async () => {
-              if (confirm('Slet denne agent og hele historikken?')) {
+              if (confirm('Delete this agent and all history?')) {
                 await deleteAgent(selectedAgent);
                 setSelectedAgent(null);
               }
@@ -454,7 +454,7 @@ function OverviewView({ agents, skillStats, setView, setSelectedAgent }) {
               </div>
             ))}
             {agents.filter(a => a.status === 'Onboarding').length === 0 && (
-              <div style={{ color: '#666', fontSize: '13px', fontStyle: 'italic' }}>Ingen agenter i onboarding lige nu</div>
+              <div style={{ color: '#666', fontSize: '13px', fontStyle: 'italic' }}>No agents currently in onboarding</div>
             )}
           </div>
         </div>
@@ -520,7 +520,7 @@ function AgentListView({ agents, skills, setSelectedAgent, marketFilter, setMark
             textTransform: 'uppercase', letterSpacing: '0.1em',
             display: 'flex', alignItems: 'center', gap: '6px',
           }}>
-            <UserPlus size={14} /> Ny agent
+            <UserPlus size={14} /> New agent
           </button>
         )}
       </div>
@@ -529,7 +529,7 @@ function AgentListView({ agents, skills, setSelectedAgent, marketFilter, setMark
         <div style={{ position: 'relative', flex: '1 1 280px' }}>
           <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
           <input
-            placeholder="Søg agent..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search agent..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
             style={{
               width: '100%', padding: '10px 12px 10px 36px', background: BRAND.grey,
               border: `1px solid #333`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px',
@@ -553,7 +553,7 @@ function AgentListView({ agents, skills, setSelectedAgent, marketFilter, setMark
       </div>
       {agents.length === 0 && (
         <div style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
-          Ingen agenter matchede filtreringen.
+          No agents match the current filter.
         </div>
       )}
     </div>
@@ -602,7 +602,7 @@ function AgentCard({ agent, skills, onClick }) {
           }}>{s.name}</span>
         ))}
         {agentSkills.length === 0 && (
-          <span style={{ fontSize: '11px', color: '#666', fontStyle: 'italic' }}>Ingen skills endnu</span>
+          <span style={{ fontSize: '11px', color: '#666', fontStyle: 'italic' }}>No skills assigned yet</span>
         )}
       </div>
     </div>
@@ -629,7 +629,7 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
           background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange,
           padding: '6px 14px', cursor: 'pointer',
           fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
-        }}>← Tilbage til agenter</button>
+        }}>← Back to agents</button>
         {isAdmin && (
           <button onClick={onDeleteAgent} style={{
             background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red,
@@ -637,7 +637,7 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
             fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
             display: 'flex', alignItems: 'center', gap: '4px',
           }}>
-            <Trash2 size={12} /> Slet agent
+            <Trash2 size={12} /> Delete agent
           </button>
         )}
       </div>
@@ -653,7 +653,7 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
           </div>
           <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{agent.name}</h2>
           <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
-            Startet {formatDate(agent.startDate)} · {(agent.skills || []).length} skills · {timeline.length} events
+            Started {formatDate(agent.startDate)} · {(agent.skills || []).length} skills · {timeline.length} events
           </div>
         </div>
       </div>
@@ -664,7 +664,7 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
             <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Assigned Skills</h3>
             {isAdmin && (
               <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Edit3 size={12} /> Klik for at toggle
+                <Edit3 size={12} /> Click to toggle
               </div>
             )}
           </div>
@@ -752,7 +752,7 @@ function AgentDetailView({ agentId, agents, skills, isAdmin, session, onBack, on
                 );
               })}
               {timeline.length === 0 && (
-                <div style={{ color: '#666', fontStyle: 'italic', fontSize: '13px' }}>Ingen events endnu</div>
+                <div style={{ color: '#666', fontStyle: 'italic', fontSize: '13px' }}>No events yet</div>
               )}
             </div>
           </div>
@@ -831,7 +831,7 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
         background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange,
         padding: '6px 14px', cursor: 'pointer', marginBottom: '20px',
         fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
-      }}>← Tilbage til skills</button>
+      }}>← Back to skills</button>
 
       <div style={{ marginBottom: '32px' }}>
         <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Skill Path</div>
@@ -894,6 +894,9 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
                 )}
               </div>
             ))}
+            {agentsWith.length === 0 && (
+              <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>No agents certified yet</div>
+            )}
           </div>
         </div>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
@@ -915,6 +918,9 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
                 )}
               </div>
             ))}
+            {agentsWithout.length === 0 && (
+              <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>All agents certified</div>
+            )}
           </div>
         </div>
       </div>
@@ -939,11 +945,11 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
         </div>
       </div>
 
-      <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, marginBottom: '16px' }}>
+      <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, marginBottom: '16px', overflowX: 'auto' }}>
         <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px', fontWeight: 700 }}>
           Volume distribution targets
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${skillStats.length}, 1fr)`, gap: '8px', minWidth: '800px', overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${skillStats.length}, minmax(100px, 1fr))`, gap: '8px' }}>
           {skillStats.map(s => (
             <div key={s.id} style={{
               padding: '10px', background: BRAND.black, textAlign: 'center',
@@ -971,7 +977,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
         {isAdmin && (
           <div style={{ fontSize: '10px', color: BRAND.orange, marginTop: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
             <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-            Klik et target for at redigere · Enter for at gemme
+            Click a target to edit · Enter to save
           </div>
         )}
       </div>
@@ -1017,6 +1023,13 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
                 </tr>
               );
             })}
+            {agents.length === 0 && (
+              <tr>
+                <td colSpan={skillStats.length + 3} style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
+                  No agents yet — create one via the Agent View
+                </td>
+              </tr>
+            )}
             <tr style={{ background: BRAND.black, borderTop: `2px solid ${BRAND.orange}` }}>
               <td style={{ padding: '14px 16px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: BRAND.orange, fontWeight: 700, position: 'sticky', left: 0, background: BRAND.black }}>Coverage</td>
               <td />
@@ -1034,7 +1047,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
   );
 }
 
-// ============ ADMIN (user management) ============
+// ============ ADMIN ============
 function AdminView({ session }) {
   const [users, setUsers] = useState([]);
   const [showNew, setShowNew] = useState(false);
@@ -1049,7 +1062,7 @@ function AdminView({ session }) {
     setError(''); setSuccess('');
     try {
       await createUser(form);
-      setSuccess(`Bruger "${form.displayName}" oprettet med rolle ${form.role}`);
+      setSuccess(`User "${form.displayName}" created with role ${form.role}`);
       setForm({ username: '', displayName: '', pin: '', role: 'reader' });
       setShowNew(false);
     } catch (err) {
@@ -1059,10 +1072,10 @@ function AdminView({ session }) {
 
   const handleDelete = async (userId, displayName) => {
     if (userId === session.uid) {
-      alert('Du kan ikke slette dig selv');
+      alert("You can't delete yourself");
       return;
     }
-    if (confirm(`Slet bruger "${displayName}"?`)) {
+    if (confirm(`Delete user "${displayName}"?`)) {
       await deleteUser(userId);
     }
   };
@@ -1082,13 +1095,13 @@ function AdminView({ session }) {
           textTransform: 'uppercase', letterSpacing: '0.1em',
           display: 'flex', alignItems: 'center', gap: '6px',
         }}>
-          <UserPlus size={14} /> Ny bruger
+          <UserPlus size={14} /> New user
         </button>
       </div>
 
       {showNew && (
         <form onSubmit={handleCreate} style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginBottom: '24px' }}>
-          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>Opret bruger</h3>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>Create user</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
             <div>
               <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Username</label>
@@ -1096,17 +1109,17 @@ function AdminView({ session }) {
                 placeholder="mjensen" style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
             </div>
             <div>
-              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Vist navn</label>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Display name</label>
               <input required value={form.displayName} onChange={(e) => setForm({...form, displayName: e.target.value})}
                 placeholder="Mette Jensen" style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
             </div>
             <div>
-              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>6-cifret PIN</label>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>6-digit PIN</label>
               <input required value={form.pin} onChange={(e) => setForm({...form, pin: e.target.value.replace(/\D/g, '').slice(0, 6)})}
                 placeholder="123456" style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'monospace', letterSpacing: '0.3em' }} />
             </div>
             <div>
-              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Rolle</label>
+              <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Role</label>
               <select value={form.role} onChange={(e) => setForm({...form, role: e.target.value})}
                 style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
                 <option value="reader">Reader</option>
@@ -1117,7 +1130,7 @@ function AdminView({ session }) {
           {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
           <div style={{ display: 'flex', gap: '8px' }}>
             <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
-              Opret
+              Create
             </button>
             <button type="button" onClick={() => setShowNew(false)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '10px 20px', cursor: 'pointer', fontSize: '12px' }}>
               Cancel
@@ -1128,13 +1141,13 @@ function AdminView({ session }) {
 
       {success && <div style={{ background: BRAND.orange, color: BRAND.black, padding: '12px 16px', fontSize: '13px', marginBottom: '16px', fontWeight: 700 }}>{success}</div>}
 
-      <div style={{ background: BRAND.grey, border: `1px solid #333` }}>
+      <div style={{ background: BRAND.grey, border: `1px solid #333`, overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: BRAND.black }}>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Navn</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Name</th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Username</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Rolle</th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Role</th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}></th>
             </tr>
           </thead>
@@ -1148,7 +1161,7 @@ function AdminView({ session }) {
                 </td>
                 <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                   <button onClick={() => handleDelete(u.id, u.displayName)} style={{ background: 'transparent', border: `1px solid #555`, color: '#999', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
-                    <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Slet
+                    <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
                   </button>
                 </td>
               </tr>
@@ -1159,10 +1172,10 @@ function AdminView({ session }) {
 
       <div style={{ marginTop: '24px', padding: '16px', background: BRAND.grey, border: `1px solid #333`, borderLeft: `4px solid ${BRAND.yellow}` }}>
         <div style={{ fontSize: '11px', color: BRAND.yellow, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '6px' }}>
-          Note om PIN-sikkerhed
+          Note on PIN security
         </div>
         <div style={{ fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
-          PIN-koder er hashed med SHA-256 før de gemmes. De kan ikke læses fra databasen. Hvis en bruger glemmer sin PIN, kan du slette brugeren og oprette dem igen med en ny PIN.
+          PINs are hashed with SHA-256 before being stored. They cannot be read from the database. If a user forgets their PIN, you can delete the user and create them again with a new PIN.
         </div>
       </div>
     </div>
@@ -1190,7 +1203,7 @@ function CommentModal({ agentId, session, onClose }) {
 
   return (
     <ModalShell onClose={onClose}>
-      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Tilføj note</h3>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Add note</h3>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
         <div>
           <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Type</label>
@@ -1202,17 +1215,17 @@ function CommentModal({ agentId, session, onClose }) {
           </select>
         </div>
         <div>
-          <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Dato</label>
+          <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
             style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
         </div>
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)}
-        placeholder="Skriv note om udvikling, observationer, næste skridt..."
+        placeholder="Write a note about development, observations, next steps..."
         style={{ width: '100%', minHeight: '120px', marginTop: '12px', padding: '12px', background: BRAND.black, color: BRAND.white, border: `1px solid ${BRAND.orange}`, fontFamily: 'inherit', fontSize: '14px', resize: 'vertical' }} />
       <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Gem note</button>
+        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Save note</button>
       </div>
     </ModalShell>
   );
@@ -1229,24 +1242,24 @@ function NewAgentModal({ session, onClose }) {
 
   return (
     <ModalShell onClose={onClose}>
-      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Ny agent</h3>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>New agent</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
         <div>
-          <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Navn</label>
+          <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Name</label>
           <input value={form.name} onChange={(e) => setForm({...form, name: e.target.value})}
-            placeholder="Fornavn Efternavn"
+            placeholder="First Last"
             style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           <div>
-            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Marked</label>
+            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Market</label>
             <select value={form.market} onChange={(e) => setForm({...form, market: e.target.value})}
               style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
               {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Startdato</label>
+            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Start date</label>
             <input type="date" value={form.startDate} onChange={(e) => setForm({...form, startDate: e.target.value})}
               style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
           </div>
@@ -1262,7 +1275,7 @@ function NewAgentModal({ session, onClose }) {
       </div>
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Opret agent</button>
+        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Create agent</button>
       </div>
     </ModalShell>
   );
