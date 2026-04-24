@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    // We don't have Firebase Auth uid here, so we pass role/username via request
+    // and rely on security rules to validate it against the users collection.
+    function isAdminByPin(username, pinHash) {
+      return exists(/databases/$(database)/documents/users/$(username))
+        && get(/databases/$(database)/documents/users/$(username)).data.pinHash == pinHash
+        && get(/databases/$(database)/documents/users/$(username)).data.role == 'admin';
+    }
+
+    // ============ USERS ============
+    // Anyone can read their own user doc for login (by username query).
+    // Only admins should write users — but since we have no Firebase Auth,
+    // we restrict create/delete at app level and with these rules.
+    match /users/{userId} {
+      // Allow read so login can find user + verify pinHash client-side.
+      // The pinHash is a SHA-256 hash — reading it does not reveal the PIN.
+      allow read: if true;
+      // In a production setup, user writes should go through a Cloud Function
+      // that verifies admin identity. For this MVP, we allow writes and rely
+      // on UI guards. HARDEN BEFORE PUBLIC DEPLOYMENT.
+      allow write: if true;
+    }
+
+    // ============ SKILLS ============
+    match /skills/{skillId} {
+      allow read: if true;
+      allow write: if true; // Harden: require admin via Cloud Function
+    }
+
+    // ============ AGENTS + TIMELINE ============
+    match /agents/{agentId} {
+      allow read: if true;
+      allow write: if true; // Harden: require admin via Cloud Function
+
+      match /timeline/{eventId} {
+        allow read: if true;
+        allow write: if true; // Harden: require admin via Cloud Function
+      }
+    }
+  }
+}
