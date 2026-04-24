@@ -23,7 +23,7 @@ export async function hashPin(pin) {
  */
 export async function loginWithPin(username, pin) {
   if (!/^\d{6}$/.test(pin)) {
-    throw new Error('PIN skal være 6 cifre');
+    throw new Error('PIN must be 6 digits');
   }
   const pinHash = await hashPin(pin);
   const usersRef = collection(db, 'users');
@@ -31,14 +31,14 @@ export async function loginWithPin(username, pin) {
   const snap = await getDocs(q);
 
   if (snap.empty) {
-    throw new Error('Bruger findes ikke');
+    throw new Error('User not found');
   }
 
   const userDoc = snap.docs[0];
   const data = userDoc.data();
 
   if (data.pinHash !== pinHash) {
-    throw new Error('Forkert PIN');
+    throw new Error('Incorrect PIN');
   }
 
   const session = {
@@ -77,7 +77,7 @@ export function logout() {
  */
 export async function createUser({ username, displayName, pin, role }) {
   if (!/^\d{6}$/.test(pin)) {
-    throw new Error('PIN skal være 6 cifre');
+    throw new Error('PIN must be 6 digits');
   }
   const pinHash = await hashPin(pin);
   const uid = `u_${username.toLowerCase().trim()}_${Date.now()}`;
