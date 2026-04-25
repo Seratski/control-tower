@@ -223,6 +223,144 @@ export async function convertCandidateToAgent(recruitmentId, slotNumber, agentNa
   return agentRef.id;
 }
 
+/**
+ * NEW IN ROUND 3b-1: Add empty candidate slots to existing recruitment
+ */
+export async function addCandidateSlots(recruitmentId, additionalCount) {
+  const recRef = doc(db, 'recruitments', recruitmentId);
+  const recSnap = await getDoc(recRef);
+  if (!recSnap.exists()) throw new Error('Recruitment not found');
+  const rec = recSnap.data();
+
+  const existingSlots = rec.candidates || [];
+  const maxSlot = existingSlots.length > 0 ? Math.max(...existingSlots.map(c => c.slotNumber)) : 0;
+
+  const newSlots = [];
+  for (let i = 1; i <= additionalCount; i++) {
+    newSlots.push({ slotNumber: maxSlot + i, status: 'open', agentId: null });
+  }
+
+  const updatedCandidates = [...existingSlots, ...newSlots];
+
+  // If recruitment was Completed and we add new open slots, kick it back to Live
+  let newStatus = rec.status;
+  if (rec.status === 'Completed' && newSlots.length > 0) {
+    newStatus = 'Live';
+  }
+
+  await updateDoc(recRef, {
+    candidates: updatedCandidates,
+    targetCount: updatedCandidates.length,
+    status: newStatus,
+  });
+}
+
+/**
+ * NEW IN ROUND 3b-1: Remove an empty slot
+ */
+export async function removeCandidateSlot(recruitmentId, slotNumber) {
+  const recRef = doc(db, 'recruitments', recruitmentId);
+  const recSnap = await getDoc(recRef);
+  if (!recSnap.exists()) throw new Error('Recruitment not found');
+  const rec = recSnap.data();
+
+  const slot = (rec.candidates || []).find(c => c.slotNumber === slotNumber);
+  if (!slot) throw new Error('Slot not found');
+  if (slot.status === 'hired') throw new Error('Cannot remove a hired slot. Revert hire first.');
+
+  const updatedCandidates = (rec.candidates || []).filter(c => c.slotNumber !== slotNumber);
+
+  // Recalc auto-complete: if all remaining slots are hired (and there are some), set Completed
+  const allHired = updatedCandidates.length > 0 && updatedCandidates.every(c => c.status === 'hired');
+  let newStatus = rec.status;
+  if (allHired && rec.status !== 'Completed') newStatus = 'Completed';
+
+  await updateDoc(recRef, {
+    candidates: updatedCandidates,
+    targetCount: updatedCandidates.length,
+    status: newStatus,
+  });
+}
+
+/**
+ * NEW IN ROUND 3b-1: Revert a hired slot — delete agent + free slot
+ */
+export async function revertCandidateSlotDeleteAgent(recruitmentId, slotNumber, actorName) {
+  const recRef = doc(db, 'recruitments', recruitmentId);
+  const recSnap = await getDoc(recRef);
+  if (!recSnap.exists()) throw new Error('Recruitment not found');
+  const rec = recSnap.data();
+
+  const slot = (rec.candidates || []).find(c => c.slotNumber === slotNumber);
+  if (!slot) throw new Error('Slot not found');
+  if (slot.status !== 'hired' || !slot.agentId) throw new Error('Slot is not hired');
+
+  const agentId = slot.agentId;
+  try {
+    const timelineSnap = await getDocs(collection(db, 'agents', agentId, 'timeline'));
+    await Promise.all(timelineSnap.docs.map(d => deleteDoc(d.ref)));
+    await deleteDoc(doc(db, 'agents', agentId));
+  } catch (err) {
+    console.warn('Agent already missing, freeing slot anyway', err);
+  }
+
+  const updatedCandidates = (rec.candidates || []).map(c =>
+    c.slotNumber === slotNumber
+      ? { slotNumber: c.slotNumber, status: 'open', agentId: null }
+      : c
+  );
+
+  let newStatus = rec.status;
+  if (rec.status === 'Completed') newStatus = 'Live';
+
+  await updateDoc(recRef, {
+    candidates: updatedCandidates,
+    status: newStatus,
+  });
+}
+
+/**
+ * NEW IN ROUND 3b-1: Unlink a hired slot — keep agent, free slot
+ */
+export async function unlinkCandidateSlot(recruitmentId, slotNumber, actorName) {
+  const recRef = doc(db, 'recruitments', recruitmentId);
+  const recSnap = await getDoc(recRef);
+  if (!recSnap.exists()) throw new Error('Recruitment not found');
+  const rec = recSnap.data();
+
+  const slot = (rec.candidates || []).find(c => c.slotNumber === slotNumber);
+  if (!slot) throw new Error('Slot not found');
+  if (slot.status !== 'hired' || !slot.agentId) throw new Error('Slot is not hired');
+
+  const agentId = slot.agentId;
+
+  try {
+    await updateDoc(doc(db, 'agents', agentId), { recruitmentId: null });
+    await addTimelineEvent(agentId, {
+      type: 'comment',
+      title: `Unlinked from recruitment "${rec.name}"`,
+      note: 'Slot freed; agent profile retained.',
+      createdBy: actorName,
+    });
+  } catch (err) {
+    console.warn('Could not update agent for unlink', err);
+  }
+
+  const updatedCandidates = (rec.candidates || []).map(c =>
+    c.slotNumber === slotNumber
+      ? { slotNumber: c.slotNumber, status: 'open', agentId: null }
+      : c
+  );
+
+  let newStatus = rec.status;
+  if (rec.status === 'Completed') newStatus = 'Live';
+
+  await updateDoc(recRef, {
+    candidates: updatedCandidates,
+    status: newStatus,
+  });
+}
+
 // ============ AGENTS ============
 export function subscribeAgents(callback) {
   const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
@@ -271,7 +409,35 @@ export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, 
     : `Trainer removed: ${oldTrainerName || 'Unknown'}`;
   await addTimelineEvent(agentId, { type: 'comment', title, note: '', createdBy: actorName });
 }
+/**
+ * UPDATED IN ROUND 3b-1: deleteAgent now auto-frees the recruitment slot
+ */
 export async function deleteAgent(agentId) {
+  // If agent is linked to a recruitment, free the slot first
+  try {
+    const agentSnap = await getDoc(doc(db, 'agents', agentId));
+    if (agentSnap.exists()) {
+      const agentData = agentSnap.data();
+      if (agentData.recruitmentId) {
+        const recRef = doc(db, 'recruitments', agentData.recruitmentId);
+        const recSnap = await getDoc(recRef);
+        if (recSnap.exists()) {
+          const rec = recSnap.data();
+          const updatedCandidates = (rec.candidates || []).map(c =>
+            c.agentId === agentId
+              ? { slotNumber: c.slotNumber, status: 'open', agentId: null }
+              : c
+          );
+          let newStatus = rec.status;
+          if (rec.status === 'Completed') newStatus = 'Live';
+          await updateDoc(recRef, { candidates: updatedCandidates, status: newStatus });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not free slot on agent delete', err);
+  }
+
   const timelineSnap = await getDocs(collection(db, 'agents', agentId, 'timeline'));
   await Promise.all(timelineSnap.docs.map(d => deleteDoc(d.ref)));
   await deleteDoc(doc(db, 'agents', agentId));
@@ -280,6 +446,31 @@ export async function deleteAgent(agentId) {
 // ============ BULK OPERATIONS ============
 export async function bulkDeleteAgents(agentIds) {
   for (const agentId of agentIds) {
+    // Free any recruitment slot first
+    try {
+      const agentSnap = await getDoc(doc(db, 'agents', agentId));
+      if (agentSnap.exists()) {
+        const agentData = agentSnap.data();
+        if (agentData.recruitmentId) {
+          const recRef = doc(db, 'recruitments', agentData.recruitmentId);
+          const recSnap = await getDoc(recRef);
+          if (recSnap.exists()) {
+            const rec = recSnap.data();
+            const updatedCandidates = (rec.candidates || []).map(c =>
+              c.agentId === agentId
+                ? { slotNumber: c.slotNumber, status: 'open', agentId: null }
+                : c
+            );
+            let newStatus = rec.status;
+            if (rec.status === 'Completed') newStatus = 'Live';
+            await updateDoc(recRef, { candidates: updatedCandidates, status: newStatus });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Could not free slot on bulk delete', err);
+    }
+
     const timelineSnap = await getDocs(collection(db, 'agents', agentId, 'timeline'));
     const batch = writeBatch(db);
     let count = 0;
