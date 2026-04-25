@@ -130,6 +130,43 @@ export async function updateCourseType(courseTypeId, updates) {
 }
 export async function deleteCourseType(courseTypeId) { await deleteDoc(doc(db, 'courseTypes', courseTypeId)); }
 
+// ============ COURSES ============
+export function subscribeCourses(callback) {
+  const q = query(collection(db, 'courses'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+export async function createCourse({ name, courseTypeId, market, trainerId, startDate, endDate, skillIds, recruitmentId }) {
+  const cleanId = 'co_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const finalId = cleanId + '_' + Date.now().toString().slice(-4);
+  await setDoc(doc(db, 'courses', finalId), {
+    name: name.trim(),
+    courseTypeId: courseTypeId || null,
+    market,
+    trainerId: trainerId || null,
+    startDate: startDate || null,
+    endDate: endDate || null,
+    skillIds: skillIds || [],
+    enrolledAgentIds: [],
+    recruitmentId: recruitmentId || null,
+    status: 'Planned',
+    createdAt: serverTimestamp(),
+  });
+  return finalId;
+}
+export async function updateCourse(courseId, updates) {
+  const cleanUpdates = {};
+  if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
+  if (updates.courseTypeId !== undefined) cleanUpdates.courseTypeId = updates.courseTypeId || null;
+  if (updates.market !== undefined) cleanUpdates.market = updates.market;
+  if (updates.trainerId !== undefined) cleanUpdates.trainerId = updates.trainerId || null;
+  if (updates.startDate !== undefined) cleanUpdates.startDate = updates.startDate || null;
+  if (updates.endDate !== undefined) cleanUpdates.endDate = updates.endDate || null;
+  if (updates.skillIds !== undefined) cleanUpdates.skillIds = updates.skillIds;
+  if (updates.status !== undefined) cleanUpdates.status = updates.status;
+  await updateDoc(doc(db, 'courses', courseId), cleanUpdates);
+}
+export async function deleteCourse(courseId) { await deleteDoc(doc(db, 'courses', courseId)); }
+
 // ============ RECRUITMENTS ============
 export function subscribeRecruitments(callback) {
   const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
