@@ -105,6 +105,31 @@ export async function updateRecruiter(recruiterId, updates) {
 }
 export async function deleteRecruiter(recruiterId) { await deleteDoc(doc(db, 'recruiters', recruiterId)); }
 
+// ============ COURSE TYPES ============
+export function subscribeCourseTypes(callback) {
+  const q = query(collection(db, 'courseTypes'), orderBy('name', 'asc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+export async function createCourseType({ name, description, defaultSkillIds }) {
+  const cleanId = 'ct_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const finalId = cleanId + '_' + Date.now().toString().slice(-4);
+  await setDoc(doc(db, 'courseTypes', finalId), {
+    name: name.trim(),
+    description: (description || '').trim(),
+    defaultSkillIds: defaultSkillIds || [],
+    createdAt: serverTimestamp(),
+  });
+  return finalId;
+}
+export async function updateCourseType(courseTypeId, updates) {
+  const cleanUpdates = {};
+  if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
+  if (updates.description !== undefined) cleanUpdates.description = (updates.description || '').trim();
+  if (updates.defaultSkillIds !== undefined) cleanUpdates.defaultSkillIds = updates.defaultSkillIds;
+  await updateDoc(doc(db, 'courseTypes', courseTypeId), cleanUpdates);
+}
+export async function deleteCourseType(courseTypeId) { await deleteDoc(doc(db, 'courseTypes', courseTypeId)); }
+
 // ============ RECRUITMENTS ============
 export function subscribeRecruitments(callback) {
   const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
