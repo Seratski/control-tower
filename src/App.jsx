@@ -18,6 +18,7 @@ import {
   createRecruiter, updateRecruiter, deleteRecruiter,
   subscribeCourseTypes, createCourseType, updateCourseType, deleteCourseType,
   subscribeCourses, createCourse, updateCourse, deleteCourse,
+  enrollAgentsOnCourse, unenrollAgentFromCourse, setCourseStatus,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -261,7 +262,7 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'agent' && selectedAgent && (
           <AgentDetailView agentId={selectedAgent} agents={agents} skills={skills} teams={teams} trainers={trainers}
-            recruitments={recruitments}
+            recruitments={recruitments} courses={courses}
             isAdmin={isAdmin} session={session}
             onBack={() => setSelectedAgent(null)}
             onToggleSkill={handleToggleSkill}
@@ -270,6 +271,11 @@ function Dashboard({ session, onLogout }) {
               setSelectedAgent(null);
               setView('recruitment');
               setSelectedRecruitment(recruitmentId);
+            }}
+            onJumpToCourse={(courseId) => {
+              setSelectedAgent(null);
+              setView('course');
+              setSelectedCourse(courseId);
             }}
             onDeleteAgent={async () => {
               const agent = agents.find(a => a.id === selectedAgent);
@@ -300,12 +306,19 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'recruitment' && isAdmin && selectedRecruitment && (
           <RecruitmentDetailView recruitmentId={selectedRecruitment} recruitments={recruitments}
-            trainers={trainers} recruiters={recruiters} agents={agents} session={session}
+            trainers={trainers} recruiters={recruiters} agents={agents}
+            courses={courses} courseTypes={courseTypes} session={session}
             onBack={() => setSelectedRecruitment(null)}
             onConvertSlot={(slot) => setModal({ type: 'convertCandidate', slot, recruitmentId: selectedRecruitment })}
             onAddSlots={() => setModal({ type: 'addSlots', recruitmentId: selectedRecruitment })}
             onRemoveSlot={(slot) => setModal({ type: 'removeSlot', slot, recruitmentId: selectedRecruitment })}
-            onRevertSlot={(slot) => setModal({ type: 'revertSlot', slot, recruitmentId: selectedRecruitment })} />
+            onRevertSlot={(slot) => setModal({ type: 'revertSlot', slot, recruitmentId: selectedRecruitment })}
+            onCreateOnboardingCourse={(preset) => setModal({ type: 'newCourse', preset })}
+            onJumpToCourse={(courseId) => {
+              setSelectedRecruitment(null);
+              setView('course');
+              setSelectedCourse(courseId);
+            }} />
         )}
         {view === 'course' && isAdmin && !selectedCourse && (
           <CourseListView courses={courses} courseTypes={courseTypes} trainers={trainers}
@@ -315,7 +328,22 @@ function Dashboard({ session, onLogout }) {
         {view === 'course' && isAdmin && selectedCourse && (
           <CourseDetailView courseId={selectedCourse} courses={courses} courseTypes={courseTypes}
             trainers={trainers} agents={agents} skills={skills} session={session}
-            onBack={() => setSelectedCourse(null)} />
+            onBack={() => setSelectedCourse(null)}
+            onEnroll={() => setModal({ type: 'enrollAgents', courseId: selectedCourse })}
+            onEdit={() => setModal({ type: 'editCourse', courseId: selectedCourse })}
+            onDelete={async () => {
+              const c = courses.find(x => x.id === selectedCourse);
+              if (!c) return;
+              if (confirm(`Delete course "${c.name}"?\n\nThis will not affect enrolled agents — they keep any skills already awarded.`)) {
+                await deleteCourse(selectedCourse);
+                setSelectedCourse(null);
+              }
+            }}
+            onJumpToAgent={(agentId) => {
+              setSelectedCourse(null);
+              setView('agent');
+              setSelectedAgent(agentId);
+            }} />
         )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters} courseTypes={courseTypes}
@@ -333,7 +361,15 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
       {modal?.type === 'manageCourseTypes' && <ManageCourseTypesModal courseTypes={courseTypes} skills={skills} onClose={() => setModal(null)} />}
-      {modal?.type === 'newCourse' && <NewCourseModal courseTypes={courseTypes} trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
+      {modal?.type === 'newCourse' && <NewCourseModal courseTypes={courseTypes} trainers={trainers} skills={skills} onClose={() => setModal(null)} preset={modal.preset} />}
+      {modal?.type === 'enrollAgents' && (
+        <EnrollAgentsModal courseId={modal.courseId} courses={courses} agents={agents} session={session}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'editCourse' && (
+        <EditCourseModal courseId={modal.courseId} courses={courses} courseTypes={courseTypes}
+          trainers={trainers} skills={skills} onClose={() => setModal(null)} />
+      )}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -355,7 +391,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.9 · Learning Operations</span>
+        <span>POWER · Control Tower v2.0 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -1046,7 +1082,7 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment }) {
+function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, courses, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment, onJumpToCourse }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
   const [editTrainer, setEditTrainer] = useState(false);
@@ -1146,6 +1182,34 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitment
           </InfoPill>
         )}
       </div>
+
+      {/* C3: Courses agent is enrolled in / completed */}
+      {(() => {
+        const agentCourses = (courses || []).filter(c => (c.enrolledAgentIds || []).includes(agent.id));
+        if (agentCourses.length === 0) return null;
+        return (
+          <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginBottom: '24px' }}>
+            <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>
+              Courses ({agentCourses.length})
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px' }}>
+              {agentCourses.map(c => (
+                <div key={c.id} onClick={() => onJumpToCourse && onJumpToCourse(c.id)} className="hover-lift"
+                  style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${courseStatusColor(c.status)}`, cursor: onJumpToCourse ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                    <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '2px' }}>
+                      <span style={{ color: courseStatusColor(c.status), fontWeight: 700 }}>{c.status}</span>
+                      {c.startDate && <> · {formatDate(c.startDate)}</>}
+                    </div>
+                  </div>
+                  <ChevronRight size={14} color="#666" />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
@@ -1347,7 +1411,7 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
 }
 
 // ============ RECRUITMENT DETAIL — UPDATED with Convert button ============
-function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, agents, session, onBack, onConvertSlot, onAddSlots, onRemoveSlot, onRevertSlot }) {
+function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, agents, courses, courseTypes, session, onBack, onConvertSlot, onAddSlots, onRemoveSlot, onRevertSlot, onCreateOnboardingCourse, onJumpToCourse }) {
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState(null);
   const [error, setError] = useState('');
@@ -1398,6 +1462,33 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
     }
   };
 
+  // Onboarding course integration (C3)
+  const linkedOnboardingCourse = (courses || []).find(c => c.recruitmentId === recruitmentId);
+  const hiredAgentIds = (rec.candidates || [])
+    .filter(c => c.status === 'hired' && c.agentId)
+    .map(c => c.agentId);
+  const canCreateOnboarding = hiredAgentIds.length > 0 && !linkedOnboardingCourse;
+
+  const handleCreateOnboardingCourse = () => {
+    // Pick the first course type whose name contains "onboard" (case-insensitive),
+    // or fall back to no type — admin can pick another in the modal.
+    const onboardingType = (courseTypes || []).find(ct => /onboard/i.test(ct.name));
+    const trainerId = (rec.trainerIds && rec.trainerIds[0]) || '';
+    const preset = {
+      name: `${rec.name} · Onboarding`,
+      market: rec.market,
+      courseTypeId: onboardingType?.id || '',
+      trainerId,
+      startDate: rec.classStartDate || '',
+      endDate: '',
+      skillIds: onboardingType?.defaultSkillIds || [],
+      recruitmentId,
+      enrolledAgentIds: hiredAgentIds,
+      actorName: session.displayName,
+    };
+    onCreateOnboardingCourse(preset);
+  };
+
   const toggleInForm = (field, id) => {
     const current = editForm[field] || [];
     setEditForm({ ...editForm, [field]: current.includes(id) ? current.filter(x => x !== id) : [...current, id] });
@@ -1408,6 +1499,18 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>← Back</button>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {linkedOnboardingCourse && (
+            <button onClick={() => onJumpToCourse(linkedOnboardingCourse.id)}
+              style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <BookOpen size={12} /> View onboarding course
+            </button>
+          )}
+          {canCreateOnboarding && (
+            <button onClick={handleCreateOnboardingCourse}
+              style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <BookOpen size={12} /> Create onboarding course
+            </button>
+          )}
           {!editMode && (
             <button onClick={startEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Edit3 size={12} /> Edit
@@ -1856,7 +1959,7 @@ function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onN
   );
 }
 
-function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack }) {
+function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack, onEnroll, onEdit, onDelete, onJumpToAgent }) {
   const course = courses.find(c => c.id === courseId);
   if (!course) return null;
 
@@ -1865,10 +1968,56 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
   const enrolledAgents = (course.enrolledAgentIds || []).map(id => agents.find(a => a.id === id)).filter(Boolean);
   const courseSkills = skills.filter(s => (course.skillIds || []).includes(s.id));
 
+  const [statusError, setStatusError] = useState('');
+  const [unenrollError, setUnenrollError] = useState('');
+
+  const handleStatusChange = async (newStatus) => {
+    if (newStatus === course.status) return;
+    if (newStatus === 'Completed') {
+      const skillCount = (course.skillIds || []).length;
+      const agentCount = enrolledAgents.length;
+      const msg = skillCount > 0 && agentCount > 0
+        ? `Mark course as Completed?\n\nThis will award ${skillCount} skill(s) to ${agentCount} enrolled agent(s) (skipping anyone who already has them) and add a timeline event for each.`
+        : agentCount === 0
+          ? 'Mark course as Completed?\n\nNo agents are enrolled, so no skills will be awarded.'
+          : 'Mark course as Completed?\n\nNo skills are configured, so nothing will be awarded.';
+      if (!confirm(msg)) return;
+    }
+    if (newStatus === 'Cancelled' && course.status === 'Completed') {
+      if (!confirm('Move from Completed back to Cancelled?\n\nSkills already awarded to agents will NOT be removed.')) return;
+    }
+    try {
+      setStatusError('');
+      await setCourseStatus(courseId, newStatus, session.displayName);
+    } catch (err) {
+      setStatusError(err.message || 'Failed to change status');
+    }
+  };
+
+  const handleUnenroll = async (agent) => {
+    if (!confirm(`Remove ${agent.name} from this course?`)) return;
+    try {
+      setUnenrollError('');
+      await unenrollAgentFromCourse(courseId, agent.id, course.name, session.displayName);
+    } catch (err) {
+      setUnenrollError(err.message || 'Failed to unenroll');
+    }
+  };
+
+  const isLocked = course.status === 'Completed' || course.status === 'Cancelled';
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
         <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={onEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Edit3 size={12} /> Edit
+          </button>
+          <button onClick={onDelete} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', flexWrap: 'wrap' }}>
@@ -1889,7 +2038,7 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' }}>
         <InfoPill icon={Briefcase} label="Trainer">
           {trainer ? <span style={{ fontWeight: 700 }}>{trainer.name}</span> : <em style={{ color: '#666' }}>Not assigned</em>}
         </InfoPill>
@@ -1901,8 +2050,23 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
         </InfoPill>
       </div>
 
-      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.6 }}>
-        <strong style={{ color: BRAND.yellow }}>Read-only view.</strong> Enrolling agents, changing status, and time logging come in upcoming iterations. For now, you can see the course setup as configured.
+      {/* Status switcher */}
+      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>Status</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {['Planned', 'In progress', 'Completed', 'Cancelled'].map(s => {
+              const isActive = course.status === s;
+              return (
+                <button key={s} onClick={() => handleStatusChange(s)} disabled={isActive}
+                  style={{ background: isActive ? courseStatusColor(s) : 'transparent', color: isActive ? BRAND.black : '#bbb', border: `1px solid ${isActive ? courseStatusColor(s) : '#555'}`, padding: '6px 12px', cursor: isActive ? 'default' : 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {statusError && <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginTop: '10px' }}>{statusError}</div>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
@@ -1919,17 +2083,42 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
         </div>
 
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>
-            Enrolled agents ({enrolledAgents.length})
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>
+              Enrolled agents ({enrolledAgents.length})
+            </h3>
+            {!isLocked && (
+              <button onClick={onEnroll}
+                style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <UserPlus size={12} /> Enroll
+              </button>
+            )}
+          </div>
+          {isLocked && (
+            <div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '10px' }}>
+              Course is {course.status.toLowerCase()} — enrollment locked.
+            </div>
+          )}
+          {unenrollError && <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginBottom: '10px' }}>{unenrollError}</div>}
           {enrolledAgents.length === 0 ? (
             <em style={{ color: '#666', fontSize: '12px' }}>No agents enrolled yet.</em>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {enrolledAgents.map(a => (
-                <div key={a.id} style={{ background: BRAND.black, padding: '8px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px' }}>
-                  <div style={{ fontWeight: 700 }}>{a.name}</div>
-                  <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                <div key={a.id} style={{ background: BRAND.black, padding: '8px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <div onClick={() => onJumpToAgent && onJumpToAgent(a.id)}
+                    style={{ cursor: onJumpToAgent ? 'pointer' : 'default', flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700 }}>{a.name}</div>
+                    <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                  </div>
+                  {!isLocked && (
+                    <button onClick={() => handleUnenroll(a)} title="Remove from course"
+                      style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                      onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                      <X size={14} />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1940,17 +2129,17 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
   );
 }
 
-function NewCourseModal({ courseTypes, trainers, skills, onClose }) {
+function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
   const [form, setForm] = useState({
-    name: '',
-    courseTypeId: '',
-    market: 'DK',
-    trainerId: '',
-    startDate: '',
-    endDate: '',
-    skillIds: [],
+    name: preset?.name || '',
+    courseTypeId: preset?.courseTypeId || '',
+    market: preset?.market || 'DK',
+    trainerId: preset?.trainerId || '',
+    startDate: preset?.startDate || '',
+    endDate: preset?.endDate || '',
+    skillIds: preset?.skillIds || [],
   });
-  const [skillsTouched, setSkillsTouched] = useState(false);
+  const [skillsTouched, setSkillsTouched] = useState(!!preset?.skillIds?.length);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
@@ -1987,7 +2176,13 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose }) {
     }
     setError(''); setProcessing(true);
     try {
-      await createCourse(form);
+      const payload = { ...form };
+      if (preset?.recruitmentId) payload.recruitmentId = preset.recruitmentId;
+      const newCourseId = await createCourse(payload);
+      // If this course was created from a recruitment, auto-enroll the hired agents
+      if (preset?.enrolledAgentIds && preset.enrolledAgentIds.length > 0 && preset?.actorName) {
+        await enrollAgentsOnCourse(newCourseId, preset.enrolledAgentIds, form.name, preset.actorName);
+      }
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to create course');
@@ -2006,12 +2201,19 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose }) {
         <FormField label="Name *" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="e.g. Onboarding April 2026" />
         <div>
           <FormLabel>Market *</FormLabel>
-          <select value={form.market} onChange={(e) => handleMarketChange(e.target.value)}
-            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+          <select value={form.market} onChange={(e) => handleMarketChange(e.target.value)} disabled={!!preset}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: preset ? '#888' : BRAND.white, fontFamily: 'inherit', cursor: preset ? 'not-allowed' : 'pointer' }}>
             {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          {preset && <div style={{ fontSize: '10px', color: '#999', marginTop: '4px' }}>Inherited from recruitment</div>}
         </div>
       </div>
+
+      {preset?.enrolledAgentIds?.length > 0 && (
+        <div style={{ marginTop: '14px', padding: '10px 14px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, fontSize: '11px', color: '#bbb', lineHeight: 1.5 }}>
+          <strong style={{ color: BRAND.orange }}>{preset.enrolledAgentIds.length} agent(s)</strong> from this recruitment will be auto-enrolled when the course is created.
+        </div>
+      )}
 
       <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         <div>
@@ -2073,6 +2275,209 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose }) {
         <button onClick={save} disabled={processing}
           style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
           {processing ? 'Creating...' : 'Create course'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function EnrollAgentsModal({ courseId, courses, agents, session, onClose }) {
+  const course = courses.find(c => c.id === courseId);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!course) return null;
+
+  // Eligible: same market, not already enrolled
+  const enrolled = new Set(course.enrolledAgentIds || []);
+  const eligible = useMemo(() => {
+    return agents
+      .filter(a => a.market === course.market && !enrolled.has(a.id))
+      .filter(a => !search || a.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, course.market, search]);
+
+  const toggle = (agentId) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId); else next.add(agentId);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (selected.size === 0) { setError('Pick at least one agent'); return; }
+    setError(''); setProcessing(true);
+    try {
+      await enrollAgentsOnCourse(courseId, Array.from(selected), course.name, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to enroll');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Enroll agents</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Adding agents to <strong style={{ color: BRAND.orange }}>{course.name}</strong> ({course.market}). Only agents from {course.market} are shown.
+      </div>
+
+      <div style={{ marginTop: '16px', position: 'relative' }}>
+        <Search size={14} style={{ position: 'absolute', left: '10px', top: '11px', color: '#666' }} />
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name..."
+          style={{ width: '100%', padding: '10px 10px 10px 32px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }} />
+      </div>
+
+      <div style={{ marginTop: '12px', maxHeight: '320px', overflowY: 'auto', background: BRAND.black, border: `1px solid #333` }}>
+        {eligible.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontStyle: 'italic', fontSize: '12px' }}>
+            {search ? 'No agents match search.' : `No eligible agents in ${course.market}.`}
+          </div>
+        ) : eligible.map(a => {
+          const isChecked = selected.has(a.id);
+          return (
+            <div key={a.id} onClick={() => toggle(a.id)}
+              style={{ padding: '10px 14px', borderTop: `1px solid #222`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: isChecked ? '#1a1a1a' : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {isChecked
+                  ? <CheckSquare size={16} color={BRAND.orange} />
+                  : <Square size={16} color="#555" />}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
+                  <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: '12px', fontSize: '11px', color: '#999' }}>
+        <strong style={{ color: BRAND.orange }}>{selected.size}</strong> selected of {eligible.length} eligible
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing || selected.size === 0}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || selected.size === 0) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: selected.size === 0 ? 0.5 : 1 }}>
+          {processing ? 'Enrolling...' : `Enroll ${selected.size > 0 ? selected.size : ''}`.trim()}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onClose }) {
+  const course = courses.find(c => c.id === courseId);
+  const [form, setForm] = useState({
+    name: course?.name || '',
+    courseTypeId: course?.courseTypeId || '',
+    trainerId: course?.trainerId || '',
+    startDate: course?.startDate || '',
+    endDate: course?.endDate || '',
+    skillIds: course?.skillIds || [],
+  });
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!course) return null;
+
+  const availableTrainers = trainers.filter(t => t.market === course.market);
+
+  const toggleSkill = (skillId) => {
+    const has = form.skillIds.includes(skillId);
+    setForm({ ...form, skillIds: has ? form.skillIds.filter(s => s !== skillId) : [...form.skillIds, skillId] });
+  };
+
+  const save = async () => {
+    if (!form.name.trim()) { setError('Name is required'); return; }
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      setError('End date cannot be before start date'); return;
+    }
+    setError(''); setProcessing(true);
+    try {
+      await updateCourse(courseId, form);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to update course');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Edit course</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Editing <strong style={{ color: BRAND.orange }}>{course.name}</strong>. Market is locked to {course.market}.
+      </div>
+
+      <div style={{ marginTop: '20px' }}>
+        <FormField label="Name *" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="Course name" />
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Course type</FormLabel>
+          <select value={form.courseTypeId} onChange={(e) => setForm({ ...form, courseTypeId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— No type —</option>
+            {courseTypes.map(ct => <option key={ct.id} value={ct.id}>{ct.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FormLabel>Trainer</FormLabel>
+          <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Unassigned —</option>
+            {availableTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {availableTrainers.length === 0 && <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {course.market}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Start date</FormLabel>
+          <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+        <div>
+          <FormLabel>End date</FormLabel>
+          <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Skills awarded on completion</FormLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444`, maxHeight: '160px', overflowY: 'auto' }}>
+          {skills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No skills defined yet</span>}
+          {skills.map(s => {
+            const isChecked = form.skillIds.includes(s.id);
+            return (
+              <button key={s.id} type="button" onClick={() => toggleSkill(s.id)}
+                style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>{s.name}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Saving...' : 'Save changes'}
         </button>
       </div>
     </ModalShell>
