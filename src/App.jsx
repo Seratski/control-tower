@@ -5,7 +5,7 @@ import {
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
   Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
-  Megaphone, MinusCircle, Unlink, BookOpen,
+  Megaphone, MinusCircle, Unlink, BookOpen, Zap,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
@@ -19,6 +19,8 @@ import {
   subscribeCourseTypes, createCourseType, updateCourseType, deleteCourseType,
   subscribeCourses, createCourse, updateCourse, deleteCourse,
   enrollAgentsOnCourse, unenrollAgentFromCourse, setCourseStatus,
+  subscribeUpskills, createUpskill, updateUpskill, deleteUpskill,
+  addAgentsToUpskill, removeAgentFromUpskill, setUpskillStatus,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -144,11 +146,13 @@ function Dashboard({ session, onLogout }) {
   const [recruitments, setRecruitments] = useState([]);
   const [courseTypes, setCourseTypes] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [upskills, setUpskills] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
   const [selectedRecruitment, setSelectedRecruitment] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState(null);
+  const [selectedUpskill, setSelectedUpskill] = useState(null);
   const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -162,8 +166,9 @@ function Dashboard({ session, onLogout }) {
     const unsubRecruitments = subscribeRecruitments(setRecruitments);
     const unsubCourseTypes = subscribeCourseTypes(setCourseTypes);
     const unsubCourses = subscribeCourses(setCourses);
+    const unsubUpskills = subscribeUpskills(setUpskills);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses(); };
+    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses(); unsubUpskills(); };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -238,12 +243,13 @@ function Dashboard({ session, onLogout }) {
             { id: 'matrix', label: 'Skill Matrix', icon: Activity },
             ...(isAdmin ? [{ id: 'recruitment', label: 'Recruitments', icon: Megaphone }] : []),
             ...(isAdmin ? [{ id: 'course', label: 'Courses', icon: BookOpen }] : []),
+            ...(isAdmin ? [{ id: 'upskill', label: 'Upskills', icon: Zap }] : []),
             ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: Settings }] : []),
           ].map(tab => {
             const Icon = tab.icon;
             const active = view === tab.id;
             return (
-              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); setSelectedCourse(null); }}
+              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); setSelectedCourse(null); setSelectedUpskill(null); }}
                 style={{ background: 'transparent', color: active ? BRAND.orange : '#999', border: 'none', borderBottom: `3px solid ${active ? BRAND.orange : 'transparent'}`, padding: '12px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 <Icon size={15} /> {tab.label}
               </button>
@@ -262,7 +268,7 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'agent' && selectedAgent && (
           <AgentDetailView agentId={selectedAgent} agents={agents} skills={skills} teams={teams} trainers={trainers}
-            recruitments={recruitments} courses={courses}
+            recruitments={recruitments} courses={courses} upskills={upskills}
             isAdmin={isAdmin} session={session}
             onBack={() => setSelectedAgent(null)}
             onToggleSkill={handleToggleSkill}
@@ -276,6 +282,11 @@ function Dashboard({ session, onLogout }) {
               setSelectedAgent(null);
               setView('course');
               setSelectedCourse(courseId);
+            }}
+            onJumpToUpskill={(upskillId) => {
+              setSelectedAgent(null);
+              setView('upskill');
+              setSelectedUpskill(upskillId);
             }}
             onDeleteAgent={async () => {
               const agent = agents.find(a => a.id === selectedAgent);
@@ -345,6 +356,33 @@ function Dashboard({ session, onLogout }) {
               setSelectedAgent(agentId);
             }} />
         )}
+        {view === 'upskill' && isAdmin && !selectedUpskill && (
+          <UpskillListView upskills={upskills} skills={skills} trainers={trainers}
+            setSelectedUpskill={setSelectedUpskill}
+            onNewUpskill={() => setModal({ type: 'newUpskill' })} />
+        )}
+        {view === 'upskill' && isAdmin && selectedUpskill && (
+          <UpskillDetailView upskillId={selectedUpskill} upskills={upskills}
+            skills={skills} trainers={trainers} agents={agents} session={session}
+            onBack={() => setSelectedUpskill(null)}
+            onAddAgents={() => setModal({ type: 'addUpskillAgents', upskillId: selectedUpskill })}
+            onEdit={() => setModal({ type: 'editUpskill', upskillId: selectedUpskill })}
+            onDelete={async () => {
+              const u = upskills.find(x => x.id === selectedUpskill);
+              if (!u) return;
+              const skill = skills.find(s => s.id === u.skillId);
+              const label = u.name || (skill ? skill.name : 'this upskill');
+              if (confirm(`Delete upskill "${label}"?\n\nAgents keep any skills already awarded.`)) {
+                await deleteUpskill(selectedUpskill);
+                setSelectedUpskill(null);
+              }
+            }}
+            onJumpToAgent={(agentId) => {
+              setSelectedUpskill(null);
+              setView('agent');
+              setSelectedAgent(agentId);
+            }} />
+        )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters} courseTypes={courseTypes}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
@@ -370,6 +408,19 @@ function Dashboard({ session, onLogout }) {
         <EditCourseModal courseId={modal.courseId} courses={courses} courseTypes={courseTypes}
           trainers={trainers} skills={skills} onClose={() => setModal(null)} />
       )}
+      {modal?.type === 'newUpskill' && (
+        <NewUpskillModal skills={skills} trainers={trainers} agents={agents} session={session}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'addUpskillAgents' && (
+        <AddUpskillAgentsModal upskillId={modal.upskillId} upskills={upskills}
+          agents={agents} skills={skills} session={session}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'editUpskill' && (
+        <EditUpskillModal upskillId={modal.upskillId} upskills={upskills}
+          skills={skills} trainers={trainers} onClose={() => setModal(null)} />
+      )}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -391,7 +442,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v2.0 · Learning Operations</span>
+        <span>POWER · Control Tower v2.1 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -1082,7 +1133,7 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, courses, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment, onJumpToCourse }) {
+function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, courses, upskills, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment, onJumpToCourse, onJumpToUpskill }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
   const [editTrainer, setEditTrainer] = useState(false);
@@ -1183,29 +1234,53 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitment
         )}
       </div>
 
-      {/* C3: Courses agent is enrolled in / completed */}
+      {/* C3 + C4: Courses and upskills the agent is involved in */}
       {(() => {
         const agentCourses = (courses || []).filter(c => (c.enrolledAgentIds || []).includes(agent.id));
-        if (agentCourses.length === 0) return null;
+        const agentUpskills = (upskills || []).filter(u => (u.agentIds || []).includes(agent.id));
+        if (agentCourses.length === 0 && agentUpskills.length === 0) return null;
+
         return (
           <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginBottom: '24px' }}>
             <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>
-              Courses ({agentCourses.length})
+              Training assignments ({agentCourses.length + agentUpskills.length})
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px' }}>
               {agentCourses.map(c => (
-                <div key={c.id} onClick={() => onJumpToCourse && onJumpToCourse(c.id)} className="hover-lift"
+                <div key={`c_${c.id}`} onClick={() => onJumpToCourse && onJumpToCourse(c.id)} className="hover-lift"
                   style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${courseStatusColor(c.status)}`, cursor: onJumpToCourse ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                      <BookOpen size={11} color={BRAND.orange} style={{ flexShrink: 0 }} />
+                      <span style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    </div>
                     <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '2px' }}>
-                      <span style={{ color: courseStatusColor(c.status), fontWeight: 700 }}>{c.status}</span>
+                      Course · <span style={{ color: courseStatusColor(c.status), fontWeight: 700 }}>{c.status}</span>
                       {c.startDate && <> · {formatDate(c.startDate)}</>}
                     </div>
                   </div>
                   <ChevronRight size={14} color="#666" />
                 </div>
               ))}
+              {agentUpskills.map(u => {
+                const label = upskillLabel(u, skills);
+                return (
+                  <div key={`u_${u.id}`} onClick={() => onJumpToUpskill && onJumpToUpskill(u.id)} className="hover-lift"
+                    style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${courseStatusColor(u.status)}`, cursor: onJumpToUpskill ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                        <Zap size={11} color={BRAND.orange} style={{ flexShrink: 0 }} />
+                        <span style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '2px' }}>
+                        Upskill · <span style={{ color: courseStatusColor(u.status), fontWeight: 700 }}>{u.status}</span>
+                        {u.deadline && <> · due {formatDate(u.deadline)}</>}
+                      </div>
+                    </div>
+                    <ChevronRight size={14} color="#666" />
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -2467,6 +2542,644 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
                 style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>{s.name}</button>
             );
           })}
+        </div>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Saving...' : 'Save changes'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ============ UPSKILLS (C4) ============
+
+function upskillLabel(u, skills) {
+  if (u.name && u.name.trim()) return u.name;
+  const skill = skills.find(s => s.id === u.skillId);
+  return skill ? skill.name : 'Untitled upskill';
+}
+
+function UpskillListView({ upskills, skills, trainers, setSelectedUpskill, onNewUpskill }) {
+  const [marketFilter, setMarketFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [trainerFilter, setTrainerFilter] = useState('ALL');
+  const [skillFilter, setSkillFilter] = useState('ALL');
+
+  const filtered = useMemo(() => {
+    return upskills.filter(u => {
+      if (marketFilter !== 'ALL' && u.market !== marketFilter) return false;
+      if (statusFilter !== 'ALL' && u.status !== statusFilter) return false;
+      if (trainerFilter !== 'ALL') {
+        if (trainerFilter === 'NONE' && u.trainerId) return false;
+        if (trainerFilter !== 'NONE' && u.trainerId !== trainerFilter) return false;
+      }
+      if (skillFilter !== 'ALL' && u.skillId !== skillFilter) return false;
+      return true;
+    });
+  }, [upskills, marketFilter, statusFilter, trainerFilter, skillFilter]);
+
+  const hasFilters = marketFilter !== 'ALL' || statusFilter !== 'ALL' || trainerFilter !== 'ALL' || skillFilter !== 'ALL';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            Upskills · {upskills.length} total
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+            Upskill <span style={{ color: BRAND.orange }}>tasks</span>
+          </h2>
+        </div>
+        <button onClick={onNewUpskill} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Plus size={14} /> New upskill
+        </button>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <FilterLabel>Market</FilterLabel>
+          <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Skill</FilterLabel>
+          <select value={skillFilter} onChange={(e) => setSkillFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option>
+            {skills.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Status</FilterLabel>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option>
+            <option value="Planned">Planned</option>
+            <option value="In progress">In progress</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Trainer</FilterLabel>
+          <select value={trainerFilter} onChange={(e) => setTrainerFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="NONE">None</option>
+            {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        {hasFilters && (
+          <button onClick={() => { setMarketFilter('ALL'); setStatusFilter('ALL'); setTrainerFilter('ALL'); setSkillFilter('ALL'); }}
+            style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', height: '34px' }}>
+            <X size={12} /> Clear
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
+        {filtered.map(u => {
+          const skill = skills.find(s => s.id === u.skillId);
+          const trainer = trainers.find(t => t.id === u.trainerId);
+          const agentCount = (u.agentIds || []).length;
+          const label = upskillLabel(u, skills);
+
+          return (
+            <div key={u.id} onClick={() => setSelectedUpskill(u.id)} className="hover-lift"
+              style={{ background: BRAND.grey, border: `1px solid #333`, borderTop: `3px solid ${courseStatusColor(u.status)}`, padding: '20px', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', gap: '8px' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <h3 className="display-font" style={{ margin: 0, fontSize: '18px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</h3>
+                  <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
+                    {u.market}{skill && <> · {skill.name}</>}
+                  </div>
+                </div>
+                <span style={{ fontSize: '9px', padding: '3px 8px', background: courseStatusColor(u.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {u.status}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', marginBottom: '12px' }}>
+                {u.startDate && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Starts</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(u.startDate)}</div>
+                  </div>
+                )}
+                {u.deadline && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Deadline</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(u.deadline)}</div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ paddingTop: '12px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                <div style={{ color: '#bbb' }}>
+                  <Briefcase size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                  {trainer ? trainer.name : <em style={{ color: '#666' }}>No trainer</em>}
+                </div>
+                <div style={{ color: '#bbb' }}>
+                  <Users size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                  <strong style={{ color: BRAND.orange }}>{agentCount}</strong> agent{agentCount === 1 ? '' : 's'}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
+            {upskills.length === 0 ? 'No upskill tasks yet — click "New upskill" to assign your first one.' : 'No upskills match filters.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, session, onBack, onAddAgents, onEdit, onDelete, onJumpToAgent }) {
+  const upskill = upskills.find(u => u.id === upskillId);
+  const [statusError, setStatusError] = useState('');
+  const [removeError, setRemoveError] = useState('');
+
+  if (!upskill) return null;
+
+  const skill = skills.find(s => s.id === upskill.skillId);
+  const trainer = trainers.find(t => t.id === upskill.trainerId);
+  const assignedAgents = (upskill.agentIds || []).map(id => agents.find(a => a.id === id)).filter(Boolean);
+  const label = upskillLabel(upskill, skills);
+  const isLocked = upskill.status === 'Completed' || upskill.status === 'Cancelled';
+
+  const handleStatusChange = async (newStatus) => {
+    if (newStatus === upskill.status) return;
+    if (newStatus === 'Completed') {
+      const agentCount = assignedAgents.length;
+      const skillName = skill?.name || 'the skill';
+      const msg = agentCount > 0
+        ? `Mark upskill as Completed?\n\nThis will award "${skillName}" to ${agentCount} agent(s) (skipping anyone who already has it) and add a timeline event for each.`
+        : 'Mark upskill as Completed?\n\nNo agents are assigned, so no skill will be awarded.';
+      if (!confirm(msg)) return;
+    }
+    if (newStatus === 'Cancelled' && upskill.status === 'Completed') {
+      if (!confirm('Move from Completed back to Cancelled?\n\nSkills already awarded to agents will NOT be removed.')) return;
+    }
+    try {
+      setStatusError('');
+      await setUpskillStatus(upskillId, newStatus, session.displayName);
+    } catch (err) {
+      setStatusError(err.message || 'Failed to change status');
+    }
+  };
+
+  const handleRemove = async (agent) => {
+    if (!confirm(`Remove ${agent.name} from this upskill?`)) return;
+    try {
+      setRemoveError('');
+      await removeAgentFromUpskill(upskillId, agent.id, label, session.displayName);
+    } catch (err) {
+      setRemoveError(err.message || 'Failed to remove');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={onEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Edit3 size={12} /> Edit
+          </button>
+          <button onClick={onDelete} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        <div style={{ width: '80px', height: '80px', background: BRAND.orange, color: BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="display-font">
+          <Zap size={36} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            {upskill.market}{skill && <> · {skill.name}</>}
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{label}</h2>
+          <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
+            <span style={{ background: courseStatusColor(upskill.status), color: BRAND.black, padding: '2px 8px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginRight: '8px' }}>
+              {upskill.status}
+            </span>
+            {assignedAgents.length} agent{assignedAgents.length === 1 ? '' : 's'} assigned
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' }}>
+        <InfoPill icon={Briefcase} label="Trainer">
+          {trainer ? <span style={{ fontWeight: 700 }}>{trainer.name}</span> : <em style={{ color: '#666' }}>Not assigned</em>}
+        </InfoPill>
+        <InfoPill icon={Calendar} label="Start date">
+          {upskill.startDate ? <span style={{ fontWeight: 700 }}>{formatDate(upskill.startDate)}</span> : <em style={{ color: '#666' }}>Not set</em>}
+        </InfoPill>
+        <InfoPill icon={Clock} label="Deadline">
+          {upskill.deadline ? <span style={{ fontWeight: 700 }}>{formatDate(upskill.deadline)}</span> : <em style={{ color: '#666' }}>Not set</em>}
+        </InfoPill>
+      </div>
+
+      {/* Status switcher */}
+      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>Status</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {['Planned', 'In progress', 'Completed', 'Cancelled'].map(s => {
+              const isActive = upskill.status === s;
+              return (
+                <button key={s} onClick={() => handleStatusChange(s)} disabled={isActive}
+                  style={{ background: isActive ? courseStatusColor(s) : 'transparent', color: isActive ? BRAND.black : '#bbb', border: `1px solid ${isActive ? courseStatusColor(s) : '#555'}`, padding: '6px 12px', cursor: isActive ? 'default' : 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {statusError && <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginTop: '10px' }}>{statusError}</div>}
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+          <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>
+            Assigned agents ({assignedAgents.length})
+          </h3>
+          {!isLocked && (
+            <button onClick={onAddAgents}
+              style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <UserPlus size={12} /> Add agents
+            </button>
+          )}
+        </div>
+        {isLocked && (
+          <div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '10px' }}>
+            Upskill is {upskill.status.toLowerCase()} — agent assignment locked.
+          </div>
+        )}
+        {removeError && <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginBottom: '10px' }}>{removeError}</div>}
+        {assignedAgents.length === 0 ? (
+          <em style={{ color: '#666', fontSize: '12px' }}>No agents assigned yet.</em>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {assignedAgents.map(a => (
+              <div key={a.id} style={{ background: BRAND.black, padding: '8px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <div onClick={() => onJumpToAgent && onJumpToAgent(a.id)}
+                  style={{ cursor: onJumpToAgent ? 'pointer' : 'default', flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700 }}>{a.name}</div>
+                  <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                </div>
+                {!isLocked && (
+                  <button onClick={() => handleRemove(a)} title="Remove from upskill"
+                    style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                    onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewUpskillModal({ skills, trainers, agents, session, onClose }) {
+  const [form, setForm] = useState({
+    name: '',
+    skillId: '',
+    market: 'DK',
+    trainerId: '',
+    startDate: '',
+    deadline: '',
+    agentIds: [],
+  });
+  const [agentSearch, setAgentSearch] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  const availableTrainers = trainers.filter(t => t.market === form.market);
+  const availableAgents = useMemo(() => {
+    return agents
+      .filter(a => a.market === form.market)
+      .filter(a => !agentSearch || a.name.toLowerCase().includes(agentSearch.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, form.market, agentSearch]);
+
+  const handleMarketChange = (newMarket) => {
+    const stillValidTrainer = trainers.find(t => t.id === form.trainerId && t.market === newMarket);
+    const validAgentIds = form.agentIds.filter(id => agents.find(a => a.id === id && a.market === newMarket));
+    setForm({
+      ...form,
+      market: newMarket,
+      trainerId: stillValidTrainer ? form.trainerId : '',
+      agentIds: validAgentIds,
+    });
+  };
+
+  const toggleAgent = (agentId) => {
+    const has = form.agentIds.includes(agentId);
+    setForm({ ...form, agentIds: has ? form.agentIds.filter(id => id !== agentId) : [...form.agentIds, agentId] });
+  };
+
+  const save = async () => {
+    if (!form.skillId) { setError('Skill is required'); return; }
+    if (form.startDate && form.deadline && form.deadline < form.startDate) {
+      setError('Deadline cannot be before start date'); return;
+    }
+    setError(''); setProcessing(true);
+    try {
+      const newId = await createUpskill(form);
+      // Log timeline events for the initial agents
+      if (form.agentIds.length > 0) {
+        const skill = skills.find(s => s.id === form.skillId);
+        const label = (form.name || '').trim() || skill?.name || 'Untitled upskill';
+        await addAgentsToUpskill(newId, form.agentIds, label, session.displayName);
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create upskill');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>New upskill task</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Assign one skill to one or more agents under a trainer. Status starts as <strong>Planned</strong>.
+      </div>
+
+      <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+        <FormField label="Name (optional)" value={form.name} onChange={(v) => setForm({ ...form, name: v })}
+          placeholder="Defaults to the skill name if empty" />
+        <div>
+          <FormLabel>Market *</FormLabel>
+          <select value={form.market} onChange={(e) => handleMarketChange(e.target.value)}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Skill *</FormLabel>
+          <select value={form.skillId} onChange={(e) => setForm({ ...form, skillId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Pick a skill —</option>
+            {skills.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FormLabel>Trainer</FormLabel>
+          <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Unassigned —</option>
+            {availableTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {availableTrainers.length === 0 && <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {form.market}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Start date</FormLabel>
+          <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+        <div>
+          <FormLabel>Deadline</FormLabel>
+          <input type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Agents to upskill ({form.agentIds.length} selected)</FormLabel>
+        <div style={{ position: 'relative', marginBottom: '6px' }}>
+          <Search size={14} style={{ position: 'absolute', left: '10px', top: '11px', color: '#666' }} />
+          <input value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)}
+            placeholder={`Search ${form.market} agents...`}
+            style={{ width: '100%', padding: '8px 8px 8px 32px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+        </div>
+        <div style={{ background: BRAND.black, border: `1px solid #444`, maxHeight: '180px', overflowY: 'auto' }}>
+          {availableAgents.length === 0 ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: '#666', fontStyle: 'italic', fontSize: '12px' }}>
+              {agentSearch ? 'No agents match search.' : `No agents in ${form.market}.`}
+            </div>
+          ) : availableAgents.map(a => {
+            const isChecked = form.agentIds.includes(a.id);
+            return (
+              <div key={a.id} onClick={() => toggleAgent(a.id)}
+                style={{ padding: '8px 12px', borderTop: `1px solid #222`, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: isChecked ? '#1a1a1a' : 'transparent' }}>
+                {isChecked
+                  ? <CheckSquare size={14} color={BRAND.orange} />
+                  : <Square size={14} color="#555" />}
+                <div style={{ fontSize: '12px' }}>
+                  <span style={{ fontWeight: 700 }}>{a.name}</span>
+                  <span style={{ color: '#999', marginLeft: '6px', fontSize: '10px', textTransform: 'uppercase' }}>{a.status}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Creating...' : 'Create upskill'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function AddUpskillAgentsModal({ upskillId, upskills, agents, skills, session, onClose }) {
+  const upskill = upskills.find(u => u.id === upskillId);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!upskill) return null;
+
+  const assigned = new Set(upskill.agentIds || []);
+  const eligible = useMemo(() => {
+    return agents
+      .filter(a => a.market === upskill.market && !assigned.has(a.id))
+      .filter(a => !search || a.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, upskill.market, search]);
+
+  const toggle = (agentId) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId); else next.add(agentId);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (selected.size === 0) { setError('Pick at least one agent'); return; }
+    setError(''); setProcessing(true);
+    try {
+      const label = upskillLabel(upskill, skills);
+      await addAgentsToUpskill(upskillId, Array.from(selected), label, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to add agents');
+      setProcessing(false);
+    }
+  };
+
+  const label = upskillLabel(upskill, skills);
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Add agents</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Adding agents to <strong style={{ color: BRAND.orange }}>{label}</strong> ({upskill.market}). Only agents from {upskill.market} are shown.
+      </div>
+
+      <div style={{ marginTop: '16px', position: 'relative' }}>
+        <Search size={14} style={{ position: 'absolute', left: '10px', top: '11px', color: '#666' }} />
+        <input value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name..."
+          style={{ width: '100%', padding: '10px 10px 10px 32px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }} />
+      </div>
+
+      <div style={{ marginTop: '12px', maxHeight: '320px', overflowY: 'auto', background: BRAND.black, border: `1px solid #333` }}>
+        {eligible.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontStyle: 'italic', fontSize: '12px' }}>
+            {search ? 'No agents match search.' : `No eligible agents in ${upskill.market}.`}
+          </div>
+        ) : eligible.map(a => {
+          const isChecked = selected.has(a.id);
+          return (
+            <div key={a.id} onClick={() => toggle(a.id)}
+              style={{ padding: '10px 14px', borderTop: `1px solid #222`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: isChecked ? '#1a1a1a' : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {isChecked
+                  ? <CheckSquare size={16} color={BRAND.orange} />
+                  : <Square size={16} color="#555" />}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
+                  <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: '12px', fontSize: '11px', color: '#999' }}>
+        <strong style={{ color: BRAND.orange }}>{selected.size}</strong> selected of {eligible.length} eligible
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing || selected.size === 0}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || selected.size === 0) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: selected.size === 0 ? 0.5 : 1 }}>
+          {processing ? 'Adding...' : `Add ${selected.size > 0 ? selected.size : ''}`.trim()}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function EditUpskillModal({ upskillId, upskills, skills, trainers, onClose }) {
+  const upskill = upskills.find(u => u.id === upskillId);
+  const [form, setForm] = useState({
+    name: upskill?.name || '',
+    skillId: upskill?.skillId || '',
+    trainerId: upskill?.trainerId || '',
+    startDate: upskill?.startDate || '',
+    deadline: upskill?.deadline || '',
+  });
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!upskill) return null;
+
+  const availableTrainers = trainers.filter(t => t.market === upskill.market);
+
+  const save = async () => {
+    if (!form.skillId) { setError('Skill is required'); return; }
+    if (form.startDate && form.deadline && form.deadline < form.startDate) {
+      setError('Deadline cannot be before start date'); return;
+    }
+    setError(''); setProcessing(true);
+    try {
+      await updateUpskill(upskillId, form);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to update upskill');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Edit upskill</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Market is locked to {upskill.market}. To change market, delete and recreate.
+      </div>
+
+      <div style={{ marginTop: '20px' }}>
+        <FormField label="Name (optional)" value={form.name} onChange={(v) => setForm({ ...form, name: v })}
+          placeholder="Defaults to the skill name if empty" />
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Skill *</FormLabel>
+          <select value={form.skillId} onChange={(e) => setForm({ ...form, skillId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Pick a skill —</option>
+            {skills.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FormLabel>Trainer</FormLabel>
+          <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Unassigned —</option>
+            {availableTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Start date</FormLabel>
+          <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+        <div>
+          <FormLabel>Deadline</FormLabel>
+          <input type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
         </div>
       </div>
 
