@@ -4,16 +4,17 @@ import {
   AlertCircle, ChevronRight, Clock, Award, MessageSquare,
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
-  Filter, Users2, Briefcase, CheckSquare, Square,
+  Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
   subscribeSkills, subscribeAgents, subscribeTimeline, subscribeUsers,
-  subscribeTeams, subscribeTrainers,
+  subscribeTeams, subscribeTrainers, subscribeRecruiters,
   toggleAgentSkill, updateSkillTarget, createSkill, updateSkill, deleteSkill,
   createAgent, updateAgent, deleteAgent, changeAgentTeam, changeAgentTrainer,
   createTeam, updateTeam, deleteTeam,
-  createTrainer, updateTrainer, deleteTrainer, toggleTrainerSkill,
+  createTrainer, updateTrainer, deleteTrainer,
+  createRecruiter, updateRecruiter, deleteRecruiter,
   addTimelineEvent, deleteTimelineEvent, deleteUser,
   bulkDeleteAgents, bulkAssignTeam, bulkAssignTrainer,
 } from './lib/data.js';
@@ -59,7 +60,6 @@ export default function App() {
   return <Dashboard session={session} onLogout={() => { logout(); setSession(null); }} />;
 }
 
-// ============ LOGIN ============
 function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
@@ -69,10 +69,8 @@ function LoginScreen({ onLogin }) {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    try {
-      const session = await loginWithPin(username, pin);
-      onLogin(session);
-    } catch (err) { setError(err.message || 'Login failed'); }
+    try { const session = await loginWithPin(username, pin); onLogin(session); }
+    catch (err) { setError(err.message || 'Login failed'); }
     finally { setLoading(false); }
   };
 
@@ -87,9 +85,7 @@ function LoginScreen({ onLogin }) {
         <h1 className="display-font" style={{ fontSize: '32px', margin: '20px 0 4px', lineHeight: 1 }}>
           Control <span style={{ color: BRAND.orange }}>Tower</span>
         </h1>
-        <p style={{ fontSize: '12px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>
-          Learning Operations · Login
-        </p>
+        <p style={{ fontSize: '12px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Learning Operations · Login</p>
         <form onSubmit={handleLogin} style={{ marginTop: '30px' }}>
           <label style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Username</label>
           <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. mjensen" autoFocus required
@@ -116,12 +112,12 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ============ DASHBOARD ============
 function Dashboard({ session, onLogout }) {
   const [skills, setSkills] = useState([]);
   const [agents, setAgents] = useState([]);
   const [teams, setTeams] = useState([]);
   const [trainers, setTrainers] = useState([]);
+  const [recruiters, setRecruiters] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
@@ -134,8 +130,9 @@ function Dashboard({ session, onLogout }) {
     const unsubSkills = subscribeSkills(setSkills);
     const unsubTeams = subscribeTeams(setTeams);
     const unsubTrainers = subscribeTrainers(setTrainers);
+    const unsubRecruiters = subscribeRecruiters(setRecruiters);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); };
+    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -255,9 +252,10 @@ function Dashboard({ session, onLogout }) {
           <MatrixView skillStats={skillStats} agents={agents} isAdmin={isAdmin} onUpdateTarget={updateSkillTarget} onToggleSkill={handleToggleSkill} />
         )}
         {view === 'admin' && isAdmin && (
-          <AdminView session={session} skills={skills} teams={teams} trainers={trainers}
+          <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
-            onManageTrainers={() => setModal({ type: 'manageTrainers' })} />
+            onManageTrainers={() => setModal({ type: 'manageTrainers' })}
+            onManageRecruiters={() => setModal({ type: 'manageRecruiters' })} />
         )}
       </main>
 
@@ -266,16 +264,16 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageSkills' && <ManageSkillsModal skills={skills} skillStats={skillStats} onClose={() => setModal(null)} />}
       {modal?.type === 'manageTeams' && <ManageTeamsModal teams={teams} agents={agents} onClose={() => setModal(null)} />}
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
+      {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.2 · Learning Operations</span>
+        <span>POWER · Control Tower v1.3 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
   );
 }
 
-// ============ OVERVIEW ============
 function OverviewView({ agents, skillStats, setView, setSelectedAgent }) {
   const totalAgents = agents.length;
   const activeAgents = agents.filter(a => a.status === 'Active').length;
@@ -300,23 +298,13 @@ function OverviewView({ agents, skillStats, setView, setSelectedAgent }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Skill Coverage</h3>
-            <button onClick={() => setView('matrix')} style={{ background: 'transparent', border: 'none', color: BRAND.orange, cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              View matrix <ChevronRight size={14} />
-            </button>
-          </div>
+          <h3 className="display-font" style={{ margin: '0 0 20px', fontSize: '18px' }}>Skill Coverage</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {skillStats.map(s => <SkillGapBar key={s.id} skill={s} />)}
           </div>
         </div>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Agents in Training</h3>
-            <button onClick={() => setView('agent')} style={{ background: 'transparent', border: 'none', color: BRAND.orange, cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              View all <ChevronRight size={14} />
-            </button>
-          </div>
+          <h3 className="display-font" style={{ margin: '0 0 20px', fontSize: '18px' }}>Agents in Training</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {agents.filter(a => a.status === 'Onboarding').map(a => (
               <div key={a.id} onClick={() => { setView('agent'); setSelectedAgent(a.id); }} className="hover-lift"
@@ -376,7 +364,6 @@ function SkillGapBar({ skill }) {
   );
 }
 
-// ============ AGENT LIST WITH BULK OPS ============
 function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAdmin, session, onAddAgent }) {
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState('ALL');
@@ -388,7 +375,7 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [selected, setSelected] = useState(new Set());
-  const [bulkModal, setBulkModal] = useState(null); // 'team' | 'trainer' | 'delete'
+  const [bulkModal, setBulkModal] = useState(null);
   const [processing, setProcessing] = useState(false);
 
   const filtered = useMemo(() => {
@@ -437,12 +424,12 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
   }, [agents, teams, search, marketFilter, teamFilter, statusFilter, trainerFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
 
   const resetFilters = () => {
-    setSearch(''); setMarketFilter('ALL'); setTeamFilter('ALL');
-    setStatusFilter('ALL'); setTrainerFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
+    setSearch(''); setMarketFilter('ALL'); setTeamFilter('ALL'); setStatusFilter('ALL');
+    setTrainerFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
   };
 
-  const hasActiveFilters = search || marketFilter !== 'ALL' || teamFilter !== 'ALL' ||
-    statusFilter !== 'ALL' || trainerFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
+  const hasActiveFilters = search || marketFilter !== 'ALL' || teamFilter !== 'ALL' || statusFilter !== 'ALL' ||
+    trainerFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -452,76 +439,48 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
   const toggleSelection = (agentId) => {
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(agentId)) next.delete(agentId);
-      else next.add(agentId);
+      if (next.has(agentId)) next.delete(agentId); else next.add(agentId);
       return next;
     });
   };
 
   const toggleSelectAll = () => {
-    if (selected.size === filtered.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(filtered.map(a => a.id)));
-    }
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map(a => a.id)));
   };
 
   const clearSelection = () => setSelected(new Set());
-
-  // Get selected agent objects
   const selectedAgents = useMemo(() => agents.filter(a => selected.has(a.id)), [agents, selected]);
-
-  // Detect market conflicts for bulk team/trainer assign
   const selectedMarkets = useMemo(() => [...new Set(selectedAgents.map(a => a.market))], [selectedAgents]);
   const sharedMarket = selectedMarkets.length === 1 ? selectedMarkets[0] : null;
 
   const handleBulkDelete = async () => {
     setProcessing(true);
-    try {
-      await bulkDeleteAgents([...selected]);
-      setSelected(new Set());
-      setBulkModal(null);
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setProcessing(false);
-    }
+    try { await bulkDeleteAgents([...selected]); setSelected(new Set()); setBulkModal(null); }
+    catch (err) { alert(`Error: ${err.message}`); } finally { setProcessing(false); }
   };
-
   const handleBulkTeam = async (teamId) => {
     setProcessing(true);
     try {
       const team = teams.find(t => t.id === teamId);
       await bulkAssignTeam([...selected], teamId || null, team?.name, agents, teams, session.displayName);
-      setSelected(new Set());
-      setBulkModal(null);
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setProcessing(false);
-    }
+      setSelected(new Set()); setBulkModal(null);
+    } catch (err) { alert(`Error: ${err.message}`); } finally { setProcessing(false); }
   };
-
   const handleBulkTrainer = async (trainerId) => {
     setProcessing(true);
     try {
       const trainer = trainers.find(t => t.id === trainerId);
       await bulkAssignTrainer([...selected], trainerId || null, trainer?.name, agents, trainers, session.displayName);
-      setSelected(new Set());
-      setBulkModal(null);
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setProcessing(false);
-    }
+      setSelected(new Set()); setBulkModal(null);
+    } catch (err) { alert(`Error: ${err.message}`); } finally { setProcessing(false); }
   };
 
   const SortHeader = ({ col, children, align = 'left' }) => (
     <th onClick={() => toggleSort(col)} style={{
       padding: '10px 12px', textAlign: align, fontSize: '10px', textTransform: 'uppercase',
       letterSpacing: '0.1em', color: sortBy === col ? BRAND.orange : '#999',
-      borderBottom: `2px solid ${BRAND.orange}`, cursor: 'pointer', userSelect: 'none',
-      whiteSpace: 'nowrap',
+      borderBottom: `2px solid ${BRAND.orange}`, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
     }}>
       {children} {sortBy === col && (sortDir === 'asc' ? '↑' : '↓')}
     </th>
@@ -548,7 +507,6 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
         )}
       </div>
 
-      {/* Filter bar */}
       <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '16px' }}>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
@@ -561,21 +519,18 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
           </div>
           <div><FilterLabel>Market</FilterLabel>
             <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All markets</option>
-              <option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+              <option value="ALL">All markets</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
             </select>
           </div>
           <div><FilterLabel>Team</FilterLabel>
             <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All teams</option>
-              <option value="NONE">No team</option>
+              <option value="ALL">All teams</option><option value="NONE">No team</option>
               {teams.map(t => <option key={t.id} value={t.id}>{t.name} ({t.market})</option>)}
             </select>
           </div>
           <div><FilterLabel>Status</FilterLabel>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All status</option>
-              <option value="Active">Active</option><option value="Onboarding">Onboarding</option>
+              <option value="ALL">All status</option><option value="Active">Active</option><option value="Onboarding">Onboarding</option>
             </select>
           </div>
           <div><FilterLabel>Skill</FilterLabel>
@@ -587,15 +542,13 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
           </div>
           <div><FilterLabel>Trainer</FilterLabel>
             <select value={trainerFilter} onChange={(e) => setTrainerFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All trainers</option>
-              <option value="NONE">No trainer</option>
+              <option value="ALL">All trainers</option><option value="NONE">No trainer</option>
               {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
           <div><FilterLabel>Started</FilterLabel>
             <select value={startDateFilter} onChange={(e) => setStartDateFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">Any time</option>
-              <option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option>
+              <option value="ALL">Any time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option>
             </select>
           </div>
           {hasActiveFilters && (
@@ -606,53 +559,25 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
         </div>
       </div>
 
-      {/* Bulk action bar — sticky when rows are selected */}
       {isAdmin && selected.size > 0 && (
-        <div style={{
-          background: BRAND.orange, color: BRAND.black, padding: '12px 16px',
-          marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px',
-          flexWrap: 'wrap', position: 'sticky', top: '140px', zIndex: 50,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-        }}>
+        <div style={{ background: BRAND.orange, color: BRAND.black, padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', position: 'sticky', top: '140px', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
           <div className="display-font" style={{ fontSize: '16px' }}>
             {selected.size} agent{selected.size === 1 ? '' : 's'} selected
           </div>
           <div style={{ flex: 1 }} />
-          <button onClick={() => setBulkModal('team')} style={{
-            background: BRAND.black, color: BRAND.white, border: 'none',
-            padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px',
-            textTransform: 'uppercase', letterSpacing: '0.1em',
-            display: 'flex', alignItems: 'center', gap: '6px',
-          }}>
+          <button onClick={() => setBulkModal('team')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Users2 size={12} /> Assign team
           </button>
-          <button onClick={() => setBulkModal('trainer')} style={{
-            background: BRAND.black, color: BRAND.white, border: 'none',
-            padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px',
-            textTransform: 'uppercase', letterSpacing: '0.1em',
-            display: 'flex', alignItems: 'center', gap: '6px',
-          }}>
+          <button onClick={() => setBulkModal('trainer')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Briefcase size={12} /> Assign trainer
           </button>
-          <button onClick={() => setBulkModal('delete')} style={{
-            background: BRAND.red, color: BRAND.white, border: 'none',
-            padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px',
-            textTransform: 'uppercase', letterSpacing: '0.1em',
-            display: 'flex', alignItems: 'center', gap: '6px',
-          }}>
+          <button onClick={() => setBulkModal('delete')} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Trash2 size={12} /> Delete
           </button>
-          <button onClick={clearSelection} style={{
-            background: 'transparent', color: BRAND.black, border: `1px solid ${BRAND.black}`,
-            padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px',
-            textTransform: 'uppercase', letterSpacing: '0.1em',
-          }}>
-            Clear
-          </button>
+          <button onClick={clearSelection} style={{ background: 'transparent', color: BRAND.black, border: `1px solid ${BRAND.black}`, padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Clear</button>
         </div>
       )}
 
-      {/* Agent table */}
       <div className="scrollbar" style={{ background: BRAND.grey, border: `1px solid #333`, overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
@@ -683,12 +608,10 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
               const agentSkills = skills.filter(s => (a.skills || []).includes(s.id));
               const isSelected = selected.has(a.id);
               return (
-                <tr key={a.id}
-                  className={`agent-row ${isSelected ? 'selected' : ''}`}
+                <tr key={a.id} className={`agent-row ${isSelected ? 'selected' : ''}`}
                   style={{ cursor: 'pointer', borderTop: `1px solid #333` }}>
                   {isAdmin && (
-                    <td style={{ padding: '10px 12px', width: '40px' }}
-                        onClick={(e) => { e.stopPropagation(); toggleSelection(a.id); }}>
+                    <td style={{ padding: '10px 12px', width: '40px' }} onClick={(e) => { e.stopPropagation(); toggleSelection(a.id); }}>
                       <div style={{ cursor: 'pointer', display: 'inline-flex' }}>
                         {isSelected ? <CheckSquare size={18} color={BRAND.orange} /> : <Square size={18} color="#666" />}
                       </div>
@@ -728,7 +651,6 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
         </table>
       </div>
 
-      {/* Bulk action modals */}
       {bulkModal === 'delete' && (
         <ModalShell onClose={() => !processing && setBulkModal(null)}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '22px', color: BRAND.red }}>Delete {selected.size} agent{selected.size === 1 ? '' : 's'}?</h3>
@@ -743,30 +665,20 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
             ))}
           </div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-            <button onClick={() => setBulkModal(null)} disabled={processing}
-              style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
-              Cancel
-            </button>
-            <button onClick={handleBulkDelete} disabled={processing}
-              style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+            <button onClick={() => setBulkModal(null)} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+            <button onClick={handleBulkDelete} disabled={processing} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
               {processing ? 'Deleting...' : `Delete ${selected.size} agents`}
             </button>
           </div>
         </ModalShell>
       )}
-
       {bulkModal === 'team' && (
-        <BulkAssignModal title="Assign team" itemName="team" options={teams}
-          selectedAgents={selectedAgents} sharedMarket={sharedMarket}
-          onClose={() => !processing && setBulkModal(null)}
-          onAssign={handleBulkTeam} processing={processing} />
+        <BulkAssignModal title="Assign team" itemName="team" options={teams} selectedAgents={selectedAgents} sharedMarket={sharedMarket}
+          onClose={() => !processing && setBulkModal(null)} onAssign={handleBulkTeam} processing={processing} />
       )}
-
       {bulkModal === 'trainer' && (
-        <BulkAssignModal title="Assign trainer" itemName="trainer" options={trainers}
-          selectedAgents={selectedAgents} sharedMarket={sharedMarket}
-          onClose={() => !processing && setBulkModal(null)}
-          onAssign={handleBulkTrainer} processing={processing} />
+        <BulkAssignModal title="Assign trainer" itemName="trainer" options={trainers} selectedAgents={selectedAgents} sharedMarket={sharedMarket}
+          onClose={() => !processing && setBulkModal(null)} onAssign={handleBulkTrainer} processing={processing} />
       )}
     </div>
   );
@@ -774,23 +686,18 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
 
 function BulkAssignModal({ title, itemName, options, selectedAgents, sharedMarket, onClose, onAssign, processing }) {
   const [selectedId, setSelectedId] = useState('');
-  const availableOptions = sharedMarket
-    ? options.filter(o => o.market === sharedMarket)
-    : [];
-
+  const availableOptions = sharedMarket ? options.filter(o => o.market === sharedMarket) : [];
   return (
     <ModalShell onClose={onClose}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>{title}</h3>
       <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
         Assigning {itemName} to <strong style={{ color: BRAND.orange }}>{selectedAgents.length} agent{selectedAgents.length === 1 ? '' : 's'}</strong>
       </div>
-
       {!sharedMarket && (
         <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.red}`, fontSize: '12px', color: '#bbb' }}>
           <strong style={{ color: BRAND.red }}>Market mismatch:</strong> The selected agents are from multiple markets. {itemName.charAt(0).toUpperCase() + itemName.slice(1)}s are country-specific — please narrow your selection to one market first.
         </div>
       )}
-
       {sharedMarket && (
         <>
           <div style={{ marginTop: '16px' }}>
@@ -804,29 +711,16 @@ function BulkAssignModal({ title, itemName, options, selectedAgents, sharedMarke
             </select>
             {availableOptions.length === 0 && (
               <div style={{ marginTop: '8px', fontSize: '11px', color: '#999', fontStyle: 'italic' }}>
-                No {itemName}s defined for {sharedMarket}. Create one in Admin first.
+                No {itemName}s defined for {sharedMarket}.
               </div>
             )}
           </div>
-
-          <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, maxHeight: '200px', overflowY: 'auto' }}>
-            {selectedAgents.map(a => (
-              <div key={a.id} style={{ fontSize: '12px', padding: '2px 0' }}>
-                <span style={{ fontWeight: 700 }}>{a.name}</span>
-              </div>
-            ))}
-          </div>
         </>
       )}
-
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} disabled={processing}
-          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
-          Cancel
-        </button>
+        <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
         {sharedMarket && (
-          <button onClick={() => onAssign(selectedId)} disabled={processing}
-            style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          <button onClick={() => onAssign(selectedId)} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
             {processing ? 'Saving...' : (selectedId ? 'Assign' : 'Remove')}
           </button>
         )}
@@ -844,7 +738,6 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-// ============ AGENT DETAIL ============
 function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
@@ -868,7 +761,6 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
     await changeAgentTeam(agent.id, newTeamId, newTeam?.name, team?.name, session.displayName);
     setEditTeam(false);
   };
-
   const handleTrainerChange = async (newTrainerId) => {
     const newTrainer = trainers.find(t => t.id === newTrainerId);
     await changeAgentTrainer(agent.id, newTrainerId, newTrainer?.name, trainer?.name, session.displayName);
@@ -930,20 +822,12 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Assigned Skills</h3>
-            {isAdmin && (
-              <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Edit3 size={12} /> Click to toggle
-              </div>
-            )}
-          </div>
+          <h3 className="display-font" style={{ margin: '0 0 20px', fontSize: '18px' }}>Assigned Skills</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {skills.map(s => {
               const assigned = (agent.skills || []).includes(s.id);
               return (
                 <div key={s.id} onClick={() => isAdmin && onToggleSkill(agent.id, s.id)}
-                  className={isAdmin ? 'hover-lift' : ''}
                   style={{ padding: '12px 14px', background: assigned ? BRAND.black : '#1a1a1a', borderLeft: `4px solid ${assigned ? BRAND.orange : '#333'}`, cursor: isAdmin ? 'pointer' : 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: assigned ? 1 : 0.6 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '14px' }}>{s.name}</div>
@@ -976,22 +860,19 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
                     <div style={{ position: 'absolute', left: '-28px', top: '2px', width: '22px', height: '22px', borderRadius: '50%', background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${BRAND.black}` }}>
                       <Icon size={11} color={BRAND.black} />
                     </div>
-                    <div style={{ background: BRAND.black, padding: '12px 14px', borderLeft: `3px solid ${color}`, position: 'relative' }}>
+                    <div style={{ background: BRAND.black, padding: '12px 14px', borderLeft: `3px solid ${color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                         <div style={{ fontWeight: 700, fontSize: '13px' }}>{event.title}</div>
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                           <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{formatDate(event.date)}</div>
                           {isAdmin && (
-                            <button onClick={() => deleteTimelineEvent(agent.id, event.id)}
-                              style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px' }}>
+                            <button onClick={() => deleteTimelineEvent(agent.id, event.id)} style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px' }}>
                               <X size={12} />
                             </button>
                           )}
                         </div>
                       </div>
-                      {event.note && (
-                        <div style={{ fontSize: '12px', color: '#bbb', marginTop: '6px', fontStyle: 'italic' }}>"{event.note}"</div>
-                      )}
+                      {event.note && <div style={{ fontSize: '12px', color: '#bbb', marginTop: '6px', fontStyle: 'italic' }}>"{event.note}"</div>}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px' }}>
                         <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', color, fontWeight: 700 }}>{event.type}</div>
                         {event.createdBy && (
@@ -1025,7 +906,6 @@ function InfoPill({ icon: Icon, label, children }) {
   );
 }
 
-// ============ SKILL VIEWS & MATRIX ============
 function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }) {
   return (
     <div>
@@ -1044,16 +924,12 @@ function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }
         {skillStats.map(s => {
           const status = s.gap > 10 ? 'critical' : s.gap > 0 ? 'warning' : 'ok';
           const statusColor = status === 'critical' ? BRAND.red : status === 'warning' ? BRAND.yellow : BRAND.orange;
-          const statusLabel = status === 'critical' ? 'Under-covered' : status === 'warning' ? 'Below target' : 'On target';
           return (
             <div key={s.id} onClick={() => setSelectedSkill(s.id)} className="hover-lift"
               style={{ background: BRAND.grey, border: `1px solid #333`, padding: '20px', cursor: 'pointer', borderTop: `3px solid ${statusColor}` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>{s.name}</h3>
-                <span style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, padding: '3px 8px', background: statusColor, color: BRAND.black }}>{statusLabel}</span>
-              </div>
+              <h3 className="display-font" style={{ margin: '0 0 12px', fontSize: '22px' }}>{s.name}</h3>
               <div style={{ fontSize: '12px', color: '#999', marginBottom: '16px' }}>{s.description}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Target</div>
                   <div className="display-font" style={{ fontSize: '24px', color: statusColor }}>{s.targetVolumePct}%</div>
@@ -1063,111 +939,40 @@ function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }
                   <div className="display-font" style={{ fontSize: '24px', color: BRAND.white }}>{s.actualPct.toFixed(0)}%</div>
                 </div>
               </div>
-              <div style={{ fontSize: '11px', color: '#999', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Users size={12} /> {s.agentCount} agents certified
-              </div>
             </div>
           );
         })}
       </div>
-      {skillStats.length === 0 && (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
-          No skills defined yet. {isAdmin && 'Click "Manage skills" to create the first one.'}
-        </div>
-      )}
     </div>
   );
 }
 
 function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onToggleSkill }) {
-  const [editTarget, setEditTarget] = useState(false);
-  const [targetValue, setTargetValue] = useState(skill?.targetVolumePct || 0);
   if (!skill) return null;
   const agentsWith = agents.filter(a => (a.skills || []).includes(skill.id));
   const agentsWithout = agents.filter(a => !(a.skills || []).includes(skill.id));
-  const saveTarget = async () => { await onUpdateTarget(skill.id, parseInt(targetValue) || 0); setEditTarget(false); };
-
   return (
     <div>
-      <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', marginBottom: '20px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back to skills</button>
-      <div style={{ marginBottom: '32px' }}>
-        <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Skill Path</div>
-        <h2 className="display-font" style={{ fontSize: '48px', margin: '4px 0 0', lineHeight: 1 }}>{skill.name}</h2>
-        <div style={{ fontSize: '14px', color: '#bbb', marginTop: '8px' }}>{skill.description}</div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-        <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${BRAND.orange}` }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Target Volume %</div>
-          {editTarget && isAdmin ? (
-            <div style={{ display: 'flex', gap: '6px', marginTop: '4px', alignItems: 'center' }}>
-              <input type="number" min="0" max="100" value={targetValue} onChange={(e) => setTargetValue(e.target.value)}
-                style={{ width: '80px', padding: '6px 8px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontSize: '20px', fontFamily: 'inherit', fontWeight: 700 }} />
-              <button onClick={saveTarget} style={{ background: BRAND.orange, border: 'none', color: BRAND.black, padding: '6px 10px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Save</button>
-              <button onClick={() => setEditTarget(false)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '6px 10px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
-              <div className="display-font" style={{ fontSize: '40px', color: BRAND.orange, lineHeight: 1 }}>{skill.targetVolumePct}%</div>
-              {isAdmin && (
-                <button onClick={() => { setTargetValue(skill.targetVolumePct); setEditTarget(true); }}
-                  style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                  <Edit3 size={10} /> Edit
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${BRAND.yellow}` }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual Coverage</div>
-          <div className="display-font" style={{ fontSize: '40px', color: BRAND.yellow, lineHeight: 1, marginTop: '4px' }}>{skill.actualPct.toFixed(0)}%</div>
-        </div>
-        <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${skill.gap > 0 ? BRAND.red : BRAND.orange}` }}>
-          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Gap</div>
-          <div className="display-font" style={{ fontSize: '40px', color: skill.gap > 0 ? BRAND.red : BRAND.orange, lineHeight: 1, marginTop: '4px' }}>
-            {skill.gap > 0 ? '-' : '+'}{Math.abs(skill.gap).toFixed(0)}%
-          </div>
-        </div>
-      </div>
+      <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', marginBottom: '20px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+      <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 16px', lineHeight: 1 }}>{skill.name}</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>
-            Certified · <span style={{ color: BRAND.orange }}>{agentsWith.length}</span>
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {agentsWith.map(a => (
-              <div key={a.id} style={{ padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
-                  <div style={{ fontSize: '10px', color: '#999' }}>{a.market} · {a.status}</div>
-                </div>
-                {isAdmin && (
-                  <button onClick={() => onToggleSkill(a.id, skill.id)}
-                    style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>Remove</button>
-                )}
-              </div>
-            ))}
-            {agentsWith.length === 0 && <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>No agents certified yet</div>}
-          </div>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>Certified · <span style={{ color: BRAND.orange }}>{agentsWith.length}</span></h3>
+          {agentsWith.map(a => (
+            <div key={a.id} style={{ padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, marginBottom: '6px' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
+              <div style={{ fontSize: '10px', color: '#999' }}>{a.market} · {a.status}</div>
+            </div>
+          ))}
         </div>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>
-            Not yet · <span style={{ color: BRAND.yellow }}>{agentsWithout.length}</span>
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {agentsWithout.map(a => (
-              <div key={a.id} style={{ padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid #444`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: 0.75 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
-                  <div style={{ fontSize: '10px', color: '#999' }}>{a.market} · {a.status}</div>
-                </div>
-                {isAdmin && (
-                  <button onClick={() => onToggleSkill(a.id, skill.id)}
-                    style={{ background: BRAND.orange, border: 'none', color: BRAND.black, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>+ Assign</button>
-                )}
-              </div>
-            ))}
-            {agentsWithout.length === 0 && <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>All agents certified</div>}
-          </div>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>Not yet · <span style={{ color: BRAND.yellow }}>{agentsWithout.length}</span></h3>
+          {agentsWithout.map(a => (
+            <div key={a.id} style={{ padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid #444`, marginBottom: '6px', opacity: 0.75 }}>
+              <div style={{ fontWeight: 700, fontSize: '13px' }}>{a.name}</div>
+              <div style={{ fontSize: '10px', color: '#999' }}>{a.market} · {a.status}</div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -1175,102 +980,34 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
 }
 
 function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill }) {
-  const [editingSkill, setEditingSkill] = useState(null);
   return (
     <div>
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>Skill Matrix</div>
-        <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
-          Volume targets vs. <span style={{ color: BRAND.orange }}>actual coverage</span>
-        </h2>
-        <div style={{ fontSize: '13px', color: '#bbb', marginTop: '8px', maxWidth: '700px' }}>
-          Each skill has a target share of total volume. The matrix shows which agents are certified on which skills.
-        </div>
-      </div>
-      <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, marginBottom: '16px', overflowX: 'auto' }}>
-        <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px', fontWeight: 700 }}>Volume distribution targets</div>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${skillStats.length}, minmax(100px, 1fr))`, gap: '8px' }}>
-          {skillStats.map(s => (
-            <div key={s.id} style={{ padding: '10px', background: BRAND.black, textAlign: 'center', borderTop: `3px solid ${s.gap > 10 ? BRAND.red : s.gap > 0 ? BRAND.yellow : BRAND.orange}` }}>
-              <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>{s.name}</div>
-              {editingSkill === s.id && isAdmin ? (
-                <input type="number" min="0" max="100" defaultValue={s.targetVolumePct}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { onUpdateTarget(s.id, parseInt(e.target.value) || 0); setEditingSkill(null); } }}
-                  onBlur={(e) => { onUpdateTarget(s.id, parseInt(e.target.value) || 0); setEditingSkill(null); }}
-                  autoFocus
-                  style={{ width: '50px', background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, textAlign: 'center', fontSize: '18px', fontWeight: 700, fontFamily: 'inherit', padding: '2px' }} />
-              ) : (
-                <div onClick={() => isAdmin && setEditingSkill(s.id)} style={{ cursor: isAdmin ? 'pointer' : 'default' }} className="display-font">
-                  <div style={{ fontSize: '22px', color: BRAND.orange, lineHeight: 1 }}>{s.targetVolumePct}%</div>
-                  <div style={{ fontSize: '10px', color: '#999', fontFamily: 'inherit', marginTop: '2px', textTransform: 'none', letterSpacing: 0 }}>
-                    actual {s.actualPct.toFixed(0)}%
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        {isAdmin && (
-          <div style={{ fontSize: '10px', color: BRAND.orange, marginTop: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
-            <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-            Click a target to edit · Enter to save
-          </div>
-        )}
-      </div>
-      <div className="scrollbar" style={{ overflowX: 'auto', background: BRAND.grey, border: `1px solid #333` }}>
+      <h2 className="display-font" style={{ fontSize: '42px', margin: '0 0 20px', lineHeight: 1 }}>Skill <span style={{ color: BRAND.orange }}>matrix</span></h2>
+      <div style={{ overflowX: 'auto', background: BRAND.grey, border: `1px solid #333` }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
           <thead>
             <tr style={{ background: BRAND.black }}>
-              <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}`, position: 'sticky', left: 0, background: BRAND.black }}>Agent</th>
-              <th style={{ padding: '14px 10px', textAlign: 'center', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Market</th>
+              <th style={{ padding: '14px 16px', textAlign: 'left', fontSize: '11px', textTransform: 'uppercase', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Agent</th>
               {skillStats.map(s => (
-                <th key={s.id} style={{ padding: '14px 8px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: BRAND.orange, borderBottom: `2px solid ${BRAND.orange}` }}>{s.name}</th>
+                <th key={s.id} style={{ padding: '14px 8px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', color: BRAND.orange, borderBottom: `2px solid ${BRAND.orange}` }}>{s.name}</th>
               ))}
-              <th style={{ padding: '14px 10px', textAlign: 'center', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Total</th>
             </tr>
           </thead>
           <tbody>
-            {agents.map((a, idx) => {
-              const isOnboarding = a.status === 'Onboarding';
-              return (
-                <tr key={a.id} style={{ background: idx % 2 === 0 ? '#1f1f1f' : BRAND.grey }}>
-                  <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '13px', borderBottom: `1px solid #333`, position: 'sticky', left: 0, background: idx % 2 === 0 ? '#1f1f1f' : BRAND.grey }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {a.name}
-                      {isOnboarding && <span style={{ fontSize: '9px', padding: '2px 6px', background: BRAND.yellow, color: BRAND.black, textTransform: 'uppercase', fontWeight: 700 }}>NEW</span>}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 10px', textAlign: 'center', fontSize: '11px', color: '#999', borderBottom: `1px solid #333` }}>{a.market}</td>
-                  {skillStats.map(s => {
-                    const has = (a.skills || []).includes(s.id);
-                    return (
-                      <td key={s.id} onClick={() => isAdmin && onToggleSkill(a.id, s.id)}
-                        style={{ padding: '12px 8px', textAlign: 'center', borderBottom: `1px solid #333`, cursor: isAdmin ? 'pointer' : 'default', background: has ? BRAND.orange : 'transparent', transition: 'background 0.15s' }}>
-                        {has ? <Check size={14} color={BRAND.black} style={{ display: 'block', margin: '0 auto' }} strokeWidth={3} /> : <span style={{ color: '#444', fontSize: '14px' }}>·</span>}
-                      </td>
-                    );
-                  })}
-                  <td style={{ padding: '12px 10px', textAlign: 'center', fontWeight: 900, color: BRAND.orange, fontSize: '14px', borderBottom: `1px solid #333` }}>
-                    {(a.skills || []).length}
-                  </td>
-                </tr>
-              );
-            })}
-            {agents.length === 0 && (
-              <tr><td colSpan={skillStats.length + 3} style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
-                No agents yet — create one via the Agent View
-              </td></tr>
-            )}
-            <tr style={{ background: BRAND.black, borderTop: `2px solid ${BRAND.orange}` }}>
-              <td style={{ padding: '14px 16px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', color: BRAND.orange, fontWeight: 700, position: 'sticky', left: 0, background: BRAND.black }}>Coverage</td>
-              <td />
-              {skillStats.map(s => (
-                <td key={s.id} style={{ padding: '14px 8px', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: s.gap > 10 ? BRAND.red : s.gap > 0 ? BRAND.yellow : BRAND.orange }}>
-                  {s.actualPct.toFixed(0)}%
-                </td>
-              ))}
-              <td />
-            </tr>
+            {agents.map(a => (
+              <tr key={a.id} style={{ borderTop: `1px solid #333` }}>
+                <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '13px' }}>{a.name}</td>
+                {skillStats.map(s => {
+                  const has = (a.skills || []).includes(s.id);
+                  return (
+                    <td key={s.id} onClick={() => isAdmin && onToggleSkill(a.id, s.id)}
+                      style={{ padding: '12px 8px', textAlign: 'center', cursor: isAdmin ? 'pointer' : 'default', background: has ? BRAND.orange : 'transparent' }}>
+                      {has ? <Check size={14} color={BRAND.black} strokeWidth={3} /> : <span style={{ color: '#444' }}>·</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -1278,8 +1015,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
   );
 }
 
-// ============ ADMIN ============
-function AdminView({ session, skills, teams, trainers, onManageTeams, onManageTrainers }) {
+function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams, onManageTrainers, onManageRecruiters }) {
   const [users, setUsers] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ username: '', displayName: '', pin: '', role: 'reader' });
@@ -1293,7 +1029,7 @@ function AdminView({ session, skills, teams, trainers, onManageTeams, onManageTr
     setError(''); setSuccess('');
     try {
       await createUser(form);
-      setSuccess(`User "${form.displayName}" created with role ${form.role}`);
+      setSuccess(`User "${form.displayName}" created`);
       setForm({ username: '', displayName: '', pin: '', role: 'reader' });
       setShowNew(false);
     } catch (err) { setError(err.message); }
@@ -1312,9 +1048,10 @@ function AdminView({ session, skills, teams, trainers, onManageTeams, onManageTr
           Administration <span style={{ color: BRAND.orange }}>console</span>
         </h2>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
         <AdminActionCard icon={Users2} title="Teams" count={teams.length} label="teams defined" onClick={onManageTeams} />
-        <AdminActionCard icon={Briefcase} title="Trainers" count={trainers.length} label="trainers certified" onClick={onManageTrainers} />
+        <AdminActionCard icon={Briefcase} title="Trainers" count={trainers.length} label="trainers" onClick={onManageTrainers} />
+        <AdminActionCard icon={UserCog} title="Recruiters" count={recruiters.length} label="recruiters" onClick={onManageRecruiters} />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
@@ -1326,7 +1063,6 @@ function AdminView({ session, skills, teams, trainers, onManageTeams, onManageTr
 
       {showNew && (
         <form onSubmit={handleCreate} style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginBottom: '24px' }}>
-          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '18px' }}>Create user</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
             <FormField label="Username" required value={form.username} onChange={(v) => setForm({...form, username: v})} placeholder="mjensen" />
             <FormField label="Display name" required value={form.displayName} onChange={(v) => setForm({...form, displayName: v})} placeholder="Mette Jensen" />
@@ -1383,15 +1119,6 @@ function AdminView({ session, skills, teams, trainers, onManageTeams, onManageTr
           </tbody>
         </table>
       </div>
-
-      <div style={{ marginTop: '24px', padding: '16px', background: BRAND.grey, border: `1px solid #333`, borderLeft: `4px solid ${BRAND.yellow}` }}>
-        <div style={{ fontSize: '11px', color: BRAND.yellow, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '6px' }}>
-          Note on PIN security
-        </div>
-        <div style={{ fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
-          PINs are hashed with SHA-256 before being stored. They cannot be read from the database. If a user forgets their PIN, you can delete the user and create them again with a new PIN.
-        </div>
-      </div>
     </div>
   );
 }
@@ -1433,7 +1160,6 @@ function FormField({ label, value, onChange, placeholder, required }) {
   );
 }
 
-// ============ MODALS ============
 function CommentModal({ agentId, session, onClose }) {
   const [text, setText] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -1464,7 +1190,7 @@ function CommentModal({ agentId, session, onClose }) {
         </div>
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)}
-        placeholder="Write a note about development, observations, next steps..."
+        placeholder="Write a note..."
         style={{ width: '100%', minHeight: '120px', marginTop: '12px', padding: '12px', background: BRAND.black, color: BRAND.white, border: `1px solid ${BRAND.orange}`, fontFamily: 'inherit', fontSize: '14px', resize: 'vertical' }} />
       <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
@@ -1510,24 +1236,6 @@ function NewAgentModal({ session, teams, trainers, onClose }) {
             </select>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div>
-            <FormLabel>Team (optional)</FormLabel>
-            <select value={form.teamId} onChange={(e) => setForm({...form, teamId: e.target.value})}
-              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
-              <option value="">No team</option>
-              {availableTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <FormLabel>Trainer (optional)</FormLabel>
-            <select value={form.trainerId} onChange={(e) => setForm({...form, trainerId: e.target.value})}
-              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
-              <option value="">No trainer</option>
-              {availableTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-        </div>
       </div>
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
@@ -1537,283 +1245,34 @@ function NewAgentModal({ session, teams, trainers, onClose }) {
   );
 }
 
+// ============ Generic Manage Modal (shared by Skills/Teams/Trainers/Recruiters) ============
 function ManageSkillsModal({ skills, skillStats, onClose }) {
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({});
-  const [showNew, setShowNew] = useState(false);
-  const [newForm, setNewForm] = useState({ name: '', description: '', targetVolumePct: 0, order: 99 });
-  const [error, setError] = useState('');
-
-  const startEdit = (skill) => {
-    setEditingId(skill.id);
-    setEditForm({ name: skill.name, description: skill.description, targetVolumePct: skill.targetVolumePct, order: skill.order });
-  };
-  const saveEdit = async () => {
-    setError('');
-    try { await updateSkill(editingId, editForm); setEditingId(null); } catch (err) { setError(err.message); }
-  };
-  const handleDelete = async (skill) => {
-    const stats = skillStats.find(s => s.id === skill.id);
-    if (stats && stats.agentCount > 0) {
-      alert(`Cannot delete: ${stats.agentCount} agent(s) are currently assigned to "${skill.name}". Remove these assignments first.`);
-      return;
-    }
-    if (confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) {
-      try { await deleteSkill(skill.id); } catch (err) { setError(err.message); }
-    }
-  };
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!newForm.name.trim()) { setError('Name is required'); return; }
-    try {
+  return <SimpleManageModal title="Manage skills" items={skills}
+    columns={[{ key: 'name', label: 'Name' }, { key: 'description', label: 'Description' }, { key: 'targetVolumePct', label: 'Target %', isNumber: true, width: '90px' }]}
+    defaults={{ name: '', description: '', targetVolumePct: 0, order: 99 }}
+    getUsageCount={(s) => skillStats.find(ss => ss.id === s.id)?.agentCount || 0}
+    usageBlocksDelete usageLabel="agents"
+    onCreate={async (form) => {
       const maxOrder = Math.max(0, ...skills.map(s => s.order || 0));
-      await createSkill({ ...newForm, order: newForm.order || maxOrder + 1 });
-      setNewForm({ name: '', description: '', targetVolumePct: 0, order: 99 });
-      setShowNew(false);
-    } catch (err) { setError(err.message); }
-  };
-
-  return (
-    <ModalShell onClose={onClose} wide>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Manage skills</h3>
-        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
-      </div>
-      {!showNew && (
-        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
-          <Plus size={14} /> New skill
-        </button>
-      )}
-      {showNew && (
-        <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
-          <h4 className="display-font" style={{ margin: '0 0 12px', fontSize: '16px' }}>Create new skill</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-            <FormField label="Name *" required value={newForm.name} onChange={(v) => setNewForm({...newForm, name: v})} placeholder="e.g. Warranty" />
-            <div>
-              <FormLabel>Target %</FormLabel>
-              <input type="number" min="0" max="100" value={newForm.targetVolumePct}
-                onChange={(e) => setNewForm({...newForm, targetVolumePct: e.target.value})}
-                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
-            </div>
-            <div>
-              <FormLabel>Order</FormLabel>
-              <input type="number" min="1" value={newForm.order}
-                onChange={(e) => setNewForm({...newForm, order: e.target.value})}
-                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
-            </div>
-          </div>
-          <div style={{ marginBottom: '12px' }}>
-            <FormLabel>Description</FormLabel>
-            <input value={newForm.description} onChange={(e) => setNewForm({...newForm, description: e.target.value})}
-              placeholder="Short description of the skill"
-              style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Create</button>
-            <button type="button" onClick={() => { setShowNew(false); setError(''); }} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '8px 16px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
-          </div>
-        </form>
-      )}
-      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
-      <div style={{ background: BRAND.black, border: `1px solid #333` }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-          <thead>
-            <tr style={{ background: '#1a1a1a' }}>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Order</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Name</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Description</th>
-              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Target</th>
-              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Agents</th>
-              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {skills.map(s => {
-              const stats = skillStats.find(ss => ss.id === s.id);
-              const agentCount = stats ? stats.agentCount : 0;
-              const isEditing = editingId === s.id;
-              if (isEditing) {
-                return (
-                  <tr key={s.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input type="number" min="1" value={editForm.order}
-                        onChange={(e) => setEditForm({...editForm, order: e.target.value})}
-                        style={{ width: '60px', padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input value={editForm.description} onChange={(e) => setEditForm({...editForm, description: e.target.value})}
-                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input type="number" min="0" max="100" value={editForm.targetVolumePct}
-                        onChange={(e) => setEditForm({...editForm, targetVolumePct: e.target.value})}
-                        style={{ width: '60px', padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', textAlign: 'center' }} />
-                    </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center', color: '#999' }}>{agentCount}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                      <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', marginRight: '4px' }}>Save</button>
-                      <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
-                    </td>
-                  </tr>
-                );
-              }
-              return (
-                <tr key={s.id} style={{ borderTop: `1px solid #333` }}>
-                  <td style={{ padding: '10px 12px', color: '#999', fontWeight: 700 }}>{s.order}</td>
-                  <td style={{ padding: '10px 12px', fontWeight: 700 }}>{s.name}</td>
-                  <td style={{ padding: '10px 12px', color: '#bbb', fontSize: '12px' }}>{s.description}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', color: BRAND.orange, fontWeight: 700 }}>{s.targetVolumePct}%</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', color: agentCount > 0 ? BRAND.orange : '#666' }}>{agentCount}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => startEdit(s)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, marginRight: '4px' }}>
-                      <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Edit
-                    </button>
-                    <button onClick={() => handleDelete(s)} disabled={agentCount > 0}
-                      title={agentCount > 0 ? 'Remove assignments first' : 'Delete skill'}
-                      style={{ background: 'transparent', border: `1px solid ${agentCount > 0 ? '#444' : BRAND.red}`, color: agentCount > 0 ? '#444' : BRAND.red, padding: '4px 8px', cursor: agentCount > 0 ? 'not-allowed' : 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                      <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {skills.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No skills yet — click "New skill" to create one</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ marginTop: '16px', padding: '10px 12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.yellow}`, fontSize: '11px', color: '#bbb' }}>
-        <strong style={{ color: BRAND.yellow }}>Note:</strong> Skills that are assigned to agents cannot be deleted. Remove all agent assignments first.
-      </div>
-      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Done</button>
-      </div>
-    </ModalShell>
-  );
+      await createSkill({ ...form, order: maxOrder + 1 });
+    }}
+    onUpdate={updateSkill} onDelete={deleteSkill} onClose={onClose} />;
 }
 
 function ManageTeamsModal({ teams, agents, onClose }) {
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({});
-  const [showNew, setShowNew] = useState(false);
-  const [newForm, setNewForm] = useState({ name: '', market: 'DK' });
-  const [error, setError] = useState('');
+  return <SimpleManageModal title="Manage teams" items={teams}
+    columns={[{ key: 'name', label: 'Name' }, { key: 'market', label: 'Market', isSelect: true, options: ['DK', 'NO', 'SE', 'FI'], width: '120px' }]}
+    defaults={{ name: '', market: 'DK' }}
+    getUsageCount={(t) => agents.filter(a => a.teamId === t.id).length}
+    usageBlocksDelete usageLabel="agents"
+    onCreate={createTeam} onUpdate={updateTeam} onDelete={deleteTeam} onClose={onClose} />;
+}
 
-  const startEdit = (team) => { setEditingId(team.id); setEditForm({ name: team.name, market: team.market }); };
-  const saveEdit = async () => { setError(''); try { await updateTeam(editingId, editForm); setEditingId(null); } catch (err) { setError(err.message); } };
-  const handleDelete = async (team) => {
-    const assignedCount = agents.filter(a => a.teamId === team.id).length;
-    if (assignedCount > 0) { alert(`Cannot delete: ${assignedCount} agent(s) are in team "${team.name}". Reassign them first.`); return; }
-    if (confirm(`Delete team "${team.name}"?`)) { try { await deleteTeam(team.id); } catch (err) { setError(err.message); } }
-  };
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!newForm.name.trim()) { setError('Name is required'); return; }
-    try { await createTeam(newForm); setNewForm({ name: '', market: 'DK' }); setShowNew(false); } catch (err) { setError(err.message); }
-  };
-
-  return (
-    <ModalShell onClose={onClose} wide>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Manage teams</h3>
-        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
-      </div>
-      {!showNew && (
-        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
-          <Plus size={14} /> New team
-        </button>
-      )}
-      {showNew && (
-        <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
-          <h4 className="display-font" style={{ margin: '0 0 12px', fontSize: '16px' }}>Create new team</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', marginBottom: '12px' }}>
-            <FormField label="Team name *" required value={newForm.name} onChange={(v) => setNewForm({...newForm, name: v})} placeholder="e.g. Team Aalborg" />
-            <div>
-              <FormLabel>Market *</FormLabel>
-              <select value={newForm.market} onChange={(e) => setNewForm({...newForm, market: e.target.value})}
-                style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
-                {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase' }}>Create</button>
-            <button type="button" onClick={() => { setShowNew(false); setError(''); }} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '8px 16px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
-          </div>
-        </form>
-      )}
-      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
-      <div style={{ background: BRAND.black, border: `1px solid #333` }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-          <thead>
-            <tr style={{ background: '#1a1a1a' }}>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Team</th>
-              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Market</th>
-              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Agents</th>
-              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {teams.map(t => {
-              const assignedCount = agents.filter(a => a.teamId === t.id).length;
-              const isEditing = editingId === t.id;
-              if (isEditing) {
-                return (
-                  <tr key={t.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
-                    </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                      <select value={editForm.market} onChange={(e) => setEditForm({...editForm, market: e.target.value})}
-                        style={{ padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }}>
-                        {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center', color: '#999' }}>{assignedCount}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                      <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', marginRight: '4px' }}>Save</button>
-                      <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
-                    </td>
-                  </tr>
-                );
-              }
-              return (
-                <tr key={t.id} style={{ borderTop: `1px solid #333` }}>
-                  <td style={{ padding: '10px 12px', fontWeight: 700 }}>{t.name}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', color: BRAND.orange, fontWeight: 700 }}>{t.market}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', color: assignedCount > 0 ? BRAND.orange : '#666' }}>{assignedCount}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => startEdit(t)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, marginRight: '4px' }}>
-                      <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Edit
-                    </button>
-                    <button onClick={() => handleDelete(t)} disabled={assignedCount > 0}
-                      title={assignedCount > 0 ? 'Reassign agents first' : 'Delete team'}
-                      style={{ background: 'transparent', border: `1px solid ${assignedCount > 0 ? '#444' : BRAND.red}`, color: assignedCount > 0 ? '#444' : BRAND.red, padding: '4px 8px', cursor: assignedCount > 0 ? 'not-allowed' : 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                      <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {teams.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No teams yet — click "New team" to create one</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Done</button>
-      </div>
-    </ModalShell>
-  );
+function ManageRecruitersModal({ recruiters, onClose }) {
+  return <SimpleManageModal title="Manage recruiters" items={recruiters}
+    columns={[{ key: 'name', label: 'Name' }, { key: 'market', label: 'Market', isSelect: true, options: ['DK', 'NO', 'SE', 'FI'], width: '120px' }]}
+    defaults={{ name: '', market: 'DK' }}
+    onCreate={createRecruiter} onUpdate={updateRecruiter} onDelete={deleteRecruiter} onClose={onClose} />;
 }
 
 function ManageTrainersModal({ trainers, skills, onClose }) {
@@ -1823,30 +1282,23 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
   const [newForm, setNewForm] = useState({ name: '', market: 'DK', certifiedSkills: [] });
   const [error, setError] = useState('');
 
-  const startEdit = (trainer) => { setEditingId(trainer.id); setEditForm({ name: trainer.name, market: trainer.market, certifiedSkills: trainer.certifiedSkills || [] }); };
-  const saveEdit = async () => { setError(''); try { await updateTrainer(editingId, editForm); setEditingId(null); } catch (err) { setError(err.message); } };
-  const handleDelete = async (trainer) => {
-    if (confirm(`Delete trainer "${trainer.name}"?`)) {
-      try { await deleteTrainer(trainer.id); } catch (err) { setError(err.message); }
-    }
-  };
+  const startEdit = (t) => { setEditingId(t.id); setEditForm({ name: t.name, market: t.market, certifiedSkills: t.certifiedSkills || [] }); };
+  const saveEdit = async () => { try { await updateTrainer(editingId, editForm); setEditingId(null); } catch (err) { setError(err.message); } };
+  const handleDelete = async (t) => { if (confirm(`Delete trainer "${t.name}"?`)) await deleteTrainer(t.id); };
   const handleCreate = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!newForm.name.trim()) { setError('Name is required'); return; }
-    try { await createTrainer(newForm); setNewForm({ name: '', market: 'DK', certifiedSkills: [] }); setShowNew(false); } catch (err) { setError(err.message); }
+    e.preventDefault(); setError('');
+    if (!newForm.name.trim()) { setError('Name required'); return; }
+    try { await createTrainer(newForm); setNewForm({ name: '', market: 'DK', certifiedSkills: [] }); setShowNew(false); }
+    catch (err) { setError(err.message); }
   };
-  const toggleSkillInForm = (formState, setFormState, skillId) => {
+  const toggleSkill = (formState, setFormState, skillId) => {
     const has = (formState.certifiedSkills || []).includes(skillId);
     setFormState({ ...formState, certifiedSkills: has ? formState.certifiedSkills.filter(s => s !== skillId) : [...(formState.certifiedSkills || []), skillId] });
   };
 
   return (
     <ModalShell onClose={onClose} wide>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Manage trainers</h3>
-        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
-      </div>
+      <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '24px' }}>Manage trainers</h3>
       {!showNew && (
         <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
           <Plus size={14} /> New trainer
@@ -1854,9 +1306,8 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
       )}
       {showNew && (
         <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
-          <h4 className="display-font" style={{ margin: '0 0 12px', fontSize: '16px' }}>Create new trainer</h4>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', marginBottom: '12px' }}>
-            <FormField label="Trainer name *" required value={newForm.name} onChange={(v) => setNewForm({...newForm, name: v})} placeholder="First Last" />
+            <FormField label="Name *" required value={newForm.name} onChange={(v) => setNewForm({...newForm, name: v})} placeholder="First Last" />
             <div>
               <FormLabel>Market *</FormLabel>
               <select value={newForm.market} onChange={(e) => setNewForm({...newForm, market: e.target.value})}
@@ -1865,21 +1316,154 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
               </select>
             </div>
           </div>
-          <div style={{ marginBottom: '12px' }}>
-            <FormLabel>Certified to train these skills</FormLabel>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.grey, border: `1px solid #444` }}>
-              {skills.map(s => {
-                const isChecked = (newForm.certifiedSkills || []).includes(s.id);
-                return (
-                  <button key={s.id} type="button" onClick={() => toggleSkillInForm(newForm, setNewForm, s.id)}
-                    style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    {isChecked && <Check size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />}
-                    {s.name}
-                  </button>
-                );
-              })}
-              {skills.length === 0 && <span style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>No skills defined yet</span>}
-            </div>
+          <FormLabel>Certified skills</FormLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.grey, border: `1px solid #444`, marginBottom: '12px' }}>
+            {skills.map(s => {
+              const isChecked = (newForm.certifiedSkills || []).includes(s.id);
+              return (
+                <button key={s.id} type="button" onClick={() => toggleSkill(newForm, setNewForm, s.id)}
+                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Create</button>
+            <button type="button" onClick={() => setShowNew(false)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '8px 16px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
+      <div style={{ background: BRAND.black, border: `1px solid #333` }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ background: '#1a1a1a' }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Market</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Certified skills</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', color: '#999' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {trainers.map(t => {
+              const isEditing = editingId === t.id;
+              const certifiedSkills = skills.filter(s => (t.certifiedSkills || []).includes(s.id));
+              if (isEditing) return (
+                <tr key={t.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
+                  <td style={{ padding: '8px 12px' }}><input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})} style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} /></td>
+                  <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                    <select value={editForm.market} onChange={(e) => setEditForm({...editForm, market: e.target.value})} style={{ padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }}>
+                      {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: '8px 12px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {skills.map(s => {
+                        const isChecked = (editForm.certifiedSkills || []).includes(s.id);
+                        return <button key={s.id} type="button" onClick={() => toggleSkill(editForm, setEditForm, s.id)}
+                          style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '3px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>{s.name}</button>;
+                      })}
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                    <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Save</button>
+                    <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
+                  </td>
+                </tr>
+              );
+              return (
+                <tr key={t.id} style={{ borderTop: `1px solid #333` }}>
+                  <td style={{ padding: '10px 12px', fontWeight: 700 }}>{t.name}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'center', color: BRAND.orange, fontWeight: 700 }}>{t.market}</td>
+                  <td style={{ padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                      {certifiedSkills.map(s => <span key={s.id} style={{ fontSize: '10px', padding: '2px 6px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700 }}>{s.name}</span>)}
+                      {certifiedSkills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>None</span>}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => startEdit(t)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Edit</button>
+                    <button onClick={() => handleDelete(t)} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
+            {trainers.length === 0 && <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No trainers yet</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Done</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// Generic CRUD modal for simple types (Teams, Recruiters, Skills)
+function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate, onDelete, onClose, getUsageCount, usageBlocksDelete, usageLabel }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState(defaults);
+  const [error, setError] = useState('');
+
+  const startEdit = (item) => {
+    const formData = {};
+    columns.forEach(c => formData[c.key] = item[c.key] !== undefined ? item[c.key] : (c.isNumber ? 0 : ''));
+    setEditingId(item.id);
+    setEditForm(formData);
+  };
+  const saveEdit = async () => {
+    try { await onUpdate(editingId, editForm); setEditingId(null); }
+    catch (err) { setError(err.message); }
+  };
+  const handleDelete = async (item) => {
+    if (usageBlocksDelete && getUsageCount) {
+      const count = getUsageCount(item);
+      if (count > 0) { alert(`Cannot delete: ${count} ${usageLabel} are using this. Reassign first.`); return; }
+    }
+    if (confirm(`Delete "${item.name}"?`)) {
+      try { await onDelete(item.id); } catch (err) { setError(err.message); }
+    }
+  };
+  const handleCreate = async (e) => {
+    e.preventDefault(); setError('');
+    if (!newForm.name?.trim()) { setError('Name is required'); return; }
+    try { await onCreate(newForm); setNewForm(defaults); setShowNew(false); }
+    catch (err) { setError(err.message); }
+  };
+
+  return (
+    <ModalShell onClose={onClose} wide>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>{title}</h3>
+        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
+      </div>
+      {!showNew && (
+        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+          <Plus size={14} /> New
+        </button>
+      )}
+      {showNew && (
+        <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns.length}, 1fr)`, gap: '10px', marginBottom: '12px' }}>
+            {columns.map(col => (
+              <div key={col.key}>
+                <FormLabel>{col.label}</FormLabel>
+                {col.isSelect ? (
+                  <select value={newForm[col.key]} onChange={(e) => setNewForm({...newForm, [col.key]: e.target.value})}
+                    style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+                    {col.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input type={col.isNumber ? 'number' : 'text'}
+                    value={newForm[col.key]}
+                    onChange={(e) => setNewForm({...newForm, [col.key]: col.isNumber ? (parseInt(e.target.value) || 0) : e.target.value})}
+                    style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+                )}
+              </div>
+            ))}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase' }}>Create</button>
@@ -1892,80 +1476,63 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
             <tr style={{ background: '#1a1a1a' }}>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Trainer</th>
-              <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Market</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>Certified skills</th>
-              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}></th>
+              {columns.map(col => (
+                <th key={col.key} style={{ padding: '10px 12px', textAlign: col.isNumber ? 'center' : 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>{col.label}</th>
+              ))}
+              {getUsageCount && <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', color: '#999' }}>{usageLabel}</th>}
+              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', color: '#999' }}></th>
             </tr>
           </thead>
           <tbody>
-            {trainers.map(t => {
-              const isEditing = editingId === t.id;
-              const certifiedSkills = skills.filter(s => (t.certifiedSkills || []).includes(s.id));
-              if (isEditing) {
-                return (
-                  <tr key={t.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
-                    <td style={{ padding: '8px 12px' }}>
-                      <input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                        style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
+            {items.map(item => {
+              const isEditing = editingId === item.id;
+              const usageCount = getUsageCount ? getUsageCount(item) : 0;
+              if (isEditing) return (
+                <tr key={item.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
+                  {columns.map(col => (
+                    <td key={col.key} style={{ padding: '8px 12px', textAlign: col.isNumber ? 'center' : 'left' }}>
+                      {col.isSelect ? (
+                        <select value={editForm[col.key]} onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
+                          style={{ padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }}>
+                          {col.options.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input type={col.isNumber ? 'number' : 'text'}
+                          value={editForm[col.key]}
+                          onChange={(e) => setEditForm({...editForm, [col.key]: col.isNumber ? (parseInt(e.target.value) || 0) : e.target.value})}
+                          style={{ width: col.isNumber ? '60px' : '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', textAlign: col.isNumber ? 'center' : 'left' }} />
+                      )}
                     </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                      <select value={editForm.market} onChange={(e) => setEditForm({...editForm, market: e.target.value})}
-                        style={{ padding: '4px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }}>
-                        {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                        {skills.map(s => {
-                          const isChecked = (editForm.certifiedSkills || []).includes(s.id);
-                          return (
-                            <button key={s.id} type="button" onClick={() => toggleSkillInForm(editForm, setEditForm, s.id)}
-                              style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '3px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
-                              {s.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                      <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', marginRight: '4px' }}>Save</button>
-                      <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
-                    </td>
-                  </tr>
-                );
-              }
-              return (
-                <tr key={t.id} style={{ borderTop: `1px solid #333` }}>
-                  <td style={{ padding: '10px 12px', fontWeight: 700 }}>{t.name}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'center', color: BRAND.orange, fontWeight: 700 }}>{t.market}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
-                      {certifiedSkills.map(s => (
-                        <span key={s.id} style={{ fontSize: '10px', padding: '2px 6px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, textTransform: 'uppercase', fontWeight: 700 }}>{s.name}</span>
-                      ))}
-                      {certifiedSkills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>None</span>}
-                    </div>
+                  ))}
+                  {getUsageCount && <td style={{ padding: '8px 12px', textAlign: 'center', color: '#999' }}>{usageCount}</td>}
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                    <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', marginRight: '4px' }}>Save</button>
+                    <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
                   </td>
+                </tr>
+              );
+              return (
+                <tr key={item.id} style={{ borderTop: `1px solid #333` }}>
+                  {columns.map(col => (
+                    <td key={col.key} style={{ padding: '10px 12px', textAlign: col.isNumber ? 'center' : 'left', fontWeight: col.key === 'name' ? 700 : 400, color: col.isNumber ? BRAND.orange : (col.key === 'market' ? BRAND.orange : (col.key === 'description' ? '#bbb' : BRAND.white)) }}>
+                      {item[col.key]}{col.isNumber && col.label.includes('%') ? '%' : ''}
+                    </td>
+                  ))}
+                  {getUsageCount && <td style={{ padding: '10px 12px', textAlign: 'center', color: usageCount > 0 ? BRAND.orange : '#666' }}>{usageCount}</td>}
                   <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => startEdit(t)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, marginRight: '4px' }}>
-                      <Edit3 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Edit
-                    </button>
-                    <button onClick={() => handleDelete(t)} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                      <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
-                    </button>
+                    <button onClick={() => startEdit(item)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Edit</button>
+                    <button onClick={() => handleDelete(item)} disabled={usageBlocksDelete && usageCount > 0}
+                      style={{ background: 'transparent', border: `1px solid ${(usageBlocksDelete && usageCount > 0) ? '#444' : BRAND.red}`, color: (usageBlocksDelete && usageCount > 0) ? '#444' : BRAND.red, padding: '4px 8px', cursor: (usageBlocksDelete && usageCount > 0) ? 'not-allowed' : 'pointer', fontSize: '10px', fontWeight: 700 }}>Delete</button>
                   </td>
                 </tr>
               );
             })}
-            {trainers.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No trainers yet — click "New trainer" to create one</td></tr>
-            )}
+            {items.length === 0 && <tr><td colSpan={columns.length + (getUsageCount ? 2 : 1)} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No items yet — click "New" to create one</td></tr>}
           </tbody>
         </table>
       </div>
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Done</button>
+        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Done</button>
       </div>
     </ModalShell>
   );
