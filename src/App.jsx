@@ -237,15 +237,22 @@ function Dashboard({ session, onLogout }) {
         {view === 'overview' && <OverviewView agents={agents} skillStats={skillStats} setView={setView} setSelectedAgent={setSelectedAgent} />}
         {view === 'agent' && !selectedAgent && (
           <AgentListView agents={agents} skills={skills} teams={teams} trainers={trainers}
+            recruitments={recruitments}
             setSelectedAgent={setSelectedAgent} isAdmin={isAdmin} session={session}
             onAddAgent={() => setModal({ type: 'agent' })} />
         )}
         {view === 'agent' && selectedAgent && (
           <AgentDetailView agentId={selectedAgent} agents={agents} skills={skills} teams={teams} trainers={trainers}
+            recruitments={recruitments}
             isAdmin={isAdmin} session={session}
             onBack={() => setSelectedAgent(null)}
             onToggleSkill={handleToggleSkill}
             onAddComment={() => setModal({ type: 'comment', agentId: selectedAgent })}
+            onJumpToRecruitment={(recruitmentId) => {
+              setSelectedAgent(null);
+              setView('recruitment');
+              setSelectedRecruitment(recruitmentId);
+            }}
             onDeleteAgent={async () => {
               const agent = agents.find(a => a.id === selectedAgent);
               const linkedRec = agent?.recruitmentId ? recruitments.find(r => r.id === agent.recruitmentId) : null;
@@ -317,7 +324,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.6 · Learning Operations</span>
+        <span>POWER · Control Tower v1.7 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -656,12 +663,13 @@ function SkillGapBar({ skill }) {
   );
 }
 
-function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAdmin, session, onAddAgent }) {
+function AgentListView({ agents, skills, teams, trainers, recruitments, setSelectedAgent, isAdmin, session, onAddAgent }) {
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [teamFilter, setTeamFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [trainerFilter, setTrainerFilter] = useState('ALL');
+  const [recruitmentFilter, setRecruitmentFilter] = useState('ALL');
   const [skillHasFilter, setSkillHasFilter] = useState('ANY');
   const [startDateFilter, setStartDateFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('name');
@@ -681,6 +689,10 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       if (trainerFilter !== 'ALL') {
         if (trainerFilter === 'NONE' && a.trainerId) return false;
         if (trainerFilter !== 'NONE' && a.trainerId !== trainerFilter) return false;
+      }
+      if (recruitmentFilter !== 'ALL') {
+        if (recruitmentFilter === 'NONE' && a.recruitmentId) return false;
+        if (recruitmentFilter !== 'NONE' && a.recruitmentId !== recruitmentFilter) return false;
       }
       if (skillHasFilter !== 'ANY') {
         if (skillHasFilter.startsWith('MISSING:')) {
@@ -708,14 +720,14 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       return 0;
     });
     return list;
-  }, [agents, search, marketFilter, teamFilter, statusFilter, trainerFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
+  }, [agents, search, marketFilter, teamFilter, statusFilter, trainerFilter, recruitmentFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
 
   const resetFilters = () => {
     setSearch(''); setMarketFilter('ALL'); setTeamFilter('ALL'); setStatusFilter('ALL');
-    setTrainerFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
+    setTrainerFilter('ALL'); setRecruitmentFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
   };
   const hasActiveFilters = search || marketFilter !== 'ALL' || teamFilter !== 'ALL' || statusFilter !== 'ALL' ||
-    trainerFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
+    trainerFilter !== 'ALL' || recruitmentFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -824,6 +836,12 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
             <select value={trainerFilter} onChange={(e) => setTrainerFilter(e.target.value)} style={filterSelectStyle}>
               <option value="ALL">All</option><option value="NONE">None</option>
               {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div><FilterLabel>Recruitment</FilterLabel>
+            <select value={recruitmentFilter} onChange={(e) => setRecruitmentFilter(e.target.value)} style={filterSelectStyle}>
+              <option value="ALL">All</option><option value="NONE">None</option>
+              {(recruitments || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
           <div><FilterLabel>Started</FilterLabel>
@@ -997,7 +1015,7 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent }) {
+function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
   const [editTrainer, setEditTrainer] = useState(false);
@@ -1012,6 +1030,7 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
   const initials = agent.name.split(' ').map(n => n[0]).join('').slice(0, 2);
   const team = teams.find(t => t.id === agent.teamId);
   const trainer = trainers.find(t => t.id === agent.trainerId);
+  const recruitment = agent.recruitmentId ? (recruitments || []).find(r => r.id === agent.recruitmentId) : null;
   const availableTeams = teams.filter(t => t.market === agent.market);
   const availableTrainers = trainers.filter(t => t.market === agent.market);
 
@@ -1077,6 +1096,24 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
             </span>
           )}
         </InfoPill>
+        {agent.recruitmentId && (
+          <InfoPill icon={Megaphone} label="Recruited via">
+            {recruitment ? (
+              isAdmin && onJumpToRecruitment ? (
+                <span onClick={() => onJumpToRecruitment(recruitment.id)}
+                  title="Jump to recruitment"
+                  style={{ color: BRAND.orange, cursor: 'pointer', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  {recruitment.name}
+                  <ChevronRight size={12} />
+                </span>
+              ) : (
+                <span style={{ color: BRAND.white, fontWeight: 700 }}>{recruitment.name}</span>
+              )
+            ) : (
+              <span style={{ color: '#666', fontStyle: 'italic' }}>Recruitment removed</span>
+            )}
+          </InfoPill>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
