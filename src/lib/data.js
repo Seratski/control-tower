@@ -11,11 +11,9 @@ export function subscribeSkills(callback) {
   const q = query(collection(db, 'skills'), orderBy('order', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function updateSkillTarget(skillId, targetVolumePct) {
   await updateDoc(doc(db, 'skills', skillId), { targetVolumePct });
 }
-
 export async function createSkill({ name, description, targetVolumePct, order }) {
   const cleanId = 's_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
@@ -27,7 +25,6 @@ export async function createSkill({ name, description, targetVolumePct, order })
   });
   return finalId;
 }
-
 export async function updateSkill(skillId, updates) {
   const cleanUpdates = {};
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
@@ -36,41 +33,32 @@ export async function updateSkill(skillId, updates) {
   if (updates.order !== undefined) cleanUpdates.order = parseInt(updates.order) || 99;
   await updateDoc(doc(db, 'skills', skillId), cleanUpdates);
 }
-
-export async function deleteSkill(skillId) {
-  await deleteDoc(doc(db, 'skills', skillId));
-}
+export async function deleteSkill(skillId) { await deleteDoc(doc(db, 'skills', skillId)); }
 
 // ============ TEAMS ============
 export function subscribeTeams(callback) {
   const q = query(collection(db, 'teams'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function createTeam({ name, market }) {
   const cleanId = 't_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'teams', finalId), { name: name.trim(), market, createdAt: serverTimestamp() });
   return finalId;
 }
-
 export async function updateTeam(teamId, updates) {
   const cleanUpdates = {};
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
   if (updates.market !== undefined) cleanUpdates.market = updates.market;
   await updateDoc(doc(db, 'teams', teamId), cleanUpdates);
 }
-
-export async function deleteTeam(teamId) {
-  await deleteDoc(doc(db, 'teams', teamId));
-}
+export async function deleteTeam(teamId) { await deleteDoc(doc(db, 'teams', teamId)); }
 
 // ============ TRAINERS ============
 export function subscribeTrainers(callback) {
   const q = query(collection(db, 'trainers'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function createTrainer({ name, market, certifiedSkills }) {
   const cleanId = 'tr_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
@@ -81,7 +69,6 @@ export async function createTrainer({ name, market, certifiedSkills }) {
   });
   return finalId;
 }
-
 export async function updateTrainer(trainerId, updates) {
   const cleanUpdates = {};
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
@@ -89,23 +76,18 @@ export async function updateTrainer(trainerId, updates) {
   if (updates.certifiedSkills !== undefined) cleanUpdates.certifiedSkills = updates.certifiedSkills;
   await updateDoc(doc(db, 'trainers', trainerId), cleanUpdates);
 }
-
-export async function deleteTrainer(trainerId) {
-  await deleteDoc(doc(db, 'trainers', trainerId));
-}
-
+export async function deleteTrainer(trainerId) { await deleteDoc(doc(db, 'trainers', trainerId)); }
 export async function toggleTrainerSkill(trainerId, skillId, currentlyCertified) {
   await updateDoc(doc(db, 'trainers', trainerId), {
     certifiedSkills: currentlyCertified ? arrayRemove(skillId) : arrayUnion(skillId),
   });
 }
 
-// ============ RECRUITERS (NEW) ============
+// ============ RECRUITERS ============
 export function subscribeRecruiters(callback) {
   const q = query(collection(db, 'recruiters'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function createRecruiter({ name, market }) {
   const cleanId = 'rc_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
@@ -115,16 +97,61 @@ export async function createRecruiter({ name, market }) {
   });
   return finalId;
 }
-
 export async function updateRecruiter(recruiterId, updates) {
   const cleanUpdates = {};
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
   if (updates.market !== undefined) cleanUpdates.market = updates.market;
   await updateDoc(doc(db, 'recruiters', recruiterId), cleanUpdates);
 }
+export async function deleteRecruiter(recruiterId) { await deleteDoc(doc(db, 'recruiters', recruiterId)); }
 
-export async function deleteRecruiter(recruiterId) {
-  await deleteDoc(doc(db, 'recruiters', recruiterId));
+// ============ RECRUITMENTS (NEW) ============
+export function subscribeRecruitments(callback) {
+  const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+export async function createRecruitment({ name, market, targetCount, applicationDeadline, classStartDate, recruiterIds, trainerIds }) {
+  const cleanId = 'rec_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const finalId = cleanId + '_' + Date.now().toString().slice(-4);
+
+  // Auto-generate candidate slots
+  const candidates = [];
+  const target = parseInt(targetCount) || 0;
+  for (let i = 1; i <= target; i++) {
+    candidates.push({ slotNumber: i, status: 'open', agentId: null });
+  }
+
+  await setDoc(doc(db, 'recruitments', finalId), {
+    name: name.trim(),
+    market,
+    targetCount: target,
+    createdDate: new Date().toISOString().split('T')[0],
+    applicationDeadline: applicationDeadline || null,
+    classStartDate: classStartDate || null,
+    recruiterIds: recruiterIds || [],
+    trainerIds: trainerIds || [],
+    status: 'Initiated',
+    candidates,
+    createdAt: serverTimestamp(),
+  });
+  return finalId;
+}
+
+export async function updateRecruitment(recruitmentId, updates) {
+  const cleanUpdates = {};
+  if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
+  if (updates.applicationDeadline !== undefined) cleanUpdates.applicationDeadline = updates.applicationDeadline || null;
+  if (updates.classStartDate !== undefined) cleanUpdates.classStartDate = updates.classStartDate || null;
+  if (updates.recruiterIds !== undefined) cleanUpdates.recruiterIds = updates.recruiterIds;
+  if (updates.trainerIds !== undefined) cleanUpdates.trainerIds = updates.trainerIds;
+  if (updates.status !== undefined) cleanUpdates.status = updates.status;
+  await updateDoc(doc(db, 'recruitments', recruitmentId), cleanUpdates);
+}
+
+export async function deleteRecruitment(recruitmentId) {
+  // Does NOT delete linked agents — just removes the recruitment
+  await deleteDoc(doc(db, 'recruitments', recruitmentId));
 }
 
 // ============ AGENTS ============
@@ -132,7 +159,6 @@ export function subscribeAgents(callback) {
   const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function toggleAgentSkill(agentId, skillId, skillName, assign, actorName) {
   await updateDoc(doc(db, 'agents', agentId), {
     skills: assign ? arrayUnion(skillId) : arrayRemove(skillId),
@@ -143,7 +169,6 @@ export async function toggleAgentSkill(agentId, skillId, skillName, assign, acto
     note: '', createdBy: actorName,
   });
 }
-
 export async function createAgent({ name, market, startDate, status, teamId, trainerId, actorName }) {
   const newAgent = {
     name, market, startDate, status,
@@ -159,11 +184,9 @@ export async function createAgent({ name, market, startDate, status, teamId, tra
   });
   return ref.id;
 }
-
 export async function updateAgent(agentId, updates) {
   await updateDoc(doc(db, 'agents', agentId), updates);
 }
-
 export async function changeAgentTeam(agentId, newTeamId, newTeamName, oldTeamName, actorName) {
   await updateDoc(doc(db, 'agents', agentId), { teamId: newTeamId || null });
   const title = newTeamId
@@ -171,7 +194,6 @@ export async function changeAgentTeam(agentId, newTeamId, newTeamName, oldTeamNa
     : `Removed from team: ${oldTeamName || 'Unknown'}`;
   await addTimelineEvent(agentId, { type: 'comment', title, note: '', createdBy: actorName });
 }
-
 export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, oldTrainerName, actorName) {
   await updateDoc(doc(db, 'agents', agentId), { trainerId: newTrainerId || null });
   const title = newTrainerId
@@ -179,7 +201,6 @@ export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, 
     : `Trainer removed: ${oldTrainerName || 'Unknown'}`;
   await addTimelineEvent(agentId, { type: 'comment', title, note: '', createdBy: actorName });
 }
-
 export async function deleteAgent(agentId) {
   const timelineSnap = await getDocs(collection(db, 'agents', agentId, 'timeline'));
   await Promise.all(timelineSnap.docs.map(d => deleteDoc(d.ref)));
@@ -201,7 +222,6 @@ export async function bulkDeleteAgents(agentIds) {
     await deleteDoc(doc(db, 'agents', agentId));
   }
 }
-
 export async function bulkAssignTeam(agentIds, newTeamId, newTeamName, agents, teams, actorName) {
   for (const agentId of agentIds) {
     const agent = agents.find(a => a.id === agentId);
@@ -217,7 +237,6 @@ export async function bulkAssignTeam(agentIds, newTeamId, newTeamName, agents, t
     });
   }
 }
-
 export async function bulkAssignTrainer(agentIds, newTrainerId, newTrainerName, agents, trainers, actorName) {
   for (const agentId of agentIds) {
     const agent = agents.find(a => a.id === agentId);
@@ -239,7 +258,6 @@ export function subscribeTimeline(agentId, callback) {
   const q = query(collection(db, 'agents', agentId, 'timeline'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-
 export async function addTimelineEvent(agentId, { type, title, note, date, createdBy }) {
   await addDoc(collection(db, 'agents', agentId, 'timeline'), {
     type, title, note: note || '',
@@ -248,7 +266,6 @@ export async function addTimelineEvent(agentId, { type, title, note, date, creat
     createdAt: serverTimestamp(),
   });
 }
-
 export async function deleteTimelineEvent(agentId, eventId) {
   await deleteDoc(doc(db, 'agents', agentId, 'timeline', eventId));
 }
@@ -263,7 +280,4 @@ export function subscribeUsers(callback) {
     callback(users);
   });
 }
-
-export async function deleteUser(userId) {
-  await deleteDoc(doc(db, 'users', userId));
-}
+export async function deleteUser(userId) { await deleteDoc(doc(db, 'users', userId)); }
