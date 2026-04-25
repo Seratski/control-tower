@@ -5,16 +5,18 @@ import {
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
   Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
+  Megaphone,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
   subscribeSkills, subscribeAgents, subscribeTimeline, subscribeUsers,
-  subscribeTeams, subscribeTrainers, subscribeRecruiters,
+  subscribeTeams, subscribeTrainers, subscribeRecruiters, subscribeRecruitments,
   toggleAgentSkill, updateSkillTarget, createSkill, updateSkill, deleteSkill,
   createAgent, updateAgent, deleteAgent, changeAgentTeam, changeAgentTrainer,
   createTeam, updateTeam, deleteTeam,
   createTrainer, updateTrainer, deleteTrainer,
   createRecruiter, updateRecruiter, deleteRecruiter,
+  createRecruitment, updateRecruitment, deleteRecruitment,
   addTimelineEvent, deleteTimelineEvent, deleteUser,
   bulkDeleteAgents, bulkAssignTeam, bulkAssignTrainer,
 } from './lib/data.js';
@@ -28,12 +30,14 @@ const formatDate = (d) => {
   if (!d) return '';
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
-
 const daysSince = (dateStr) => {
   if (!dateStr) return null;
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
 };
-
+const daysUntil = (dateStr) => {
+  if (!dateStr) return null;
+  return Math.floor((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+};
 const timelineIcon = (type) => {
   switch(type) {
     case 'onboarding': return UserCheck;
@@ -43,7 +47,6 @@ const timelineIcon = (type) => {
     default: return Activity;
   }
 };
-
 const timelineColor = (type) => {
   switch(type) {
     case 'onboarding': return BRAND.yellow;
@@ -51,6 +54,14 @@ const timelineColor = (type) => {
     case 'training': return BRAND.red;
     case 'comment': return BRAND.grey;
     default: return BRAND.grey;
+  }
+};
+const recruitmentStatusColor = (status) => {
+  switch (status) {
+    case 'Initiated': return BRAND.yellow;
+    case 'Live': return BRAND.orange;
+    case 'Completed': return '#4ade80';
+    default: return '#666';
   }
 };
 
@@ -103,10 +114,6 @@ function LoginScreen({ onLogin }) {
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
-        <div style={{ marginTop: '24px', padding: '12px', background: BRAND.black, fontSize: '11px', color: '#999', borderLeft: `3px solid ${BRAND.yellow}` }}>
-          <Lock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-          Contact your admin if you don't have a PIN yet.
-        </div>
       </div>
     </div>
   );
@@ -118,9 +125,11 @@ function Dashboard({ session, onLogout }) {
   const [teams, setTeams] = useState([]);
   const [trainers, setTrainers] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
+  const [recruitments, setRecruitments] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
+  const [selectedRecruitment, setSelectedRecruitment] = useState(null);
   const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -131,8 +140,9 @@ function Dashboard({ session, onLogout }) {
     const unsubTeams = subscribeTeams(setTeams);
     const unsubTrainers = subscribeTrainers(setTrainers);
     const unsubRecruiters = subscribeRecruiters(setRecruiters);
+    const unsubRecruitments = subscribeRecruitments(setRecruitments);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); };
+    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -153,11 +163,9 @@ function Dashboard({ session, onLogout }) {
   };
 
   if (loading) {
-    return (
-      <div style={{ background: BRAND.black, color: BRAND.white, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: '12px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Loading</div>
-      </div>
-    );
+    return <div style={{ background: BRAND.black, color: BRAND.white, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ fontSize: '12px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Loading</div>
+    </div>;
   }
 
   return (
@@ -207,12 +215,13 @@ function Dashboard({ session, onLogout }) {
             { id: 'agent', label: 'Agent View', icon: Users },
             { id: 'skill', label: 'Skill View', icon: Target },
             { id: 'matrix', label: 'Skill Matrix', icon: Activity },
+            ...(isAdmin ? [{ id: 'recruitment', label: 'Recruitments', icon: Megaphone }] : []),
             ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: Settings }] : []),
           ].map(tab => {
             const Icon = tab.icon;
             const active = view === tab.id;
             return (
-              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); }}
+              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); }}
                 style={{ background: 'transparent', color: active ? BRAND.orange : '#999', border: 'none', borderBottom: `3px solid ${active ? BRAND.orange : 'transparent'}`, padding: '12px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 <Icon size={15} /> {tab.label}
               </button>
@@ -251,6 +260,16 @@ function Dashboard({ session, onLogout }) {
         {view === 'matrix' && (
           <MatrixView skillStats={skillStats} agents={agents} isAdmin={isAdmin} onUpdateTarget={updateSkillTarget} onToggleSkill={handleToggleSkill} />
         )}
+        {view === 'recruitment' && isAdmin && !selectedRecruitment && (
+          <RecruitmentListView recruitments={recruitments} trainers={trainers} recruiters={recruiters}
+            setSelectedRecruitment={setSelectedRecruitment}
+            onNewRecruitment={() => setModal({ type: 'newRecruitment' })} />
+        )}
+        {view === 'recruitment' && isAdmin && selectedRecruitment && (
+          <RecruitmentDetailView recruitmentId={selectedRecruitment} recruitments={recruitments}
+            trainers={trainers} recruiters={recruiters}
+            onBack={() => setSelectedRecruitment(null)} />
+        )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
@@ -265,9 +284,10 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageTeams' && <ManageTeamsModal teams={teams} agents={agents} onClose={() => setModal(null)} />}
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
+      {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.3 · Learning Operations</span>
+        <span>POWER · Control Tower v1.4 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -364,6 +384,7 @@ function SkillGapBar({ skill }) {
   );
 }
 
+// ============ AGENT LIST (with bulk ops) ============
 function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAdmin, session, onAddAgent }) {
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState('ALL');
@@ -410,24 +431,18 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       else if (sortBy === 'startDate') { va = a.startDate || ''; vb = b.startDate || ''; }
       else if (sortBy === 'skillCount') { va = (a.skills || []).length; vb = (b.skills || []).length; }
       else if (sortBy === 'market') { va = a.market; vb = b.market; }
-      else if (sortBy === 'team') {
-        const ta = teams.find(t => t.id === a.teamId);
-        const tb = teams.find(t => t.id === b.teamId);
-        va = ta ? ta.name : 'zzz'; vb = tb ? tb.name : 'zzz';
-      }
       else { va = a.name; vb = b.name; }
       if (va < vb) return sortDir === 'asc' ? -1 : 1;
       if (va > vb) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
     return list;
-  }, [agents, teams, search, marketFilter, teamFilter, statusFilter, trainerFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
+  }, [agents, search, marketFilter, teamFilter, statusFilter, trainerFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
 
   const resetFilters = () => {
     setSearch(''); setMarketFilter('ALL'); setTeamFilter('ALL'); setStatusFilter('ALL');
     setTrainerFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
   };
-
   const hasActiveFilters = search || marketFilter !== 'ALL' || teamFilter !== 'ALL' || statusFilter !== 'ALL' ||
     trainerFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
 
@@ -443,12 +458,10 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       return next;
     });
   };
-
   const toggleSelectAll = () => {
     if (selected.size === filtered.length) setSelected(new Set());
     else setSelected(new Set(filtered.map(a => a.id)));
   };
-
   const clearSelection = () => setSelected(new Set());
   const selectedAgents = useMemo(() => agents.filter(a => selected.has(a.id)), [agents, selected]);
   const selectedMarkets = useMemo(() => [...new Set(selectedAgents.map(a => a.market))], [selectedAgents]);
@@ -477,11 +490,7 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
   };
 
   const SortHeader = ({ col, children, align = 'left' }) => (
-    <th onClick={() => toggleSort(col)} style={{
-      padding: '10px 12px', textAlign: align, fontSize: '10px', textTransform: 'uppercase',
-      letterSpacing: '0.1em', color: sortBy === col ? BRAND.orange : '#999',
-      borderBottom: `2px solid ${BRAND.orange}`, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-    }}>
+    <th onClick={() => toggleSort(col)} style={{ padding: '10px 12px', textAlign: align, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: sortBy === col ? BRAND.orange : '#999', borderBottom: `2px solid ${BRAND.orange}`, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
       {children} {sortBy === col && (sortDir === 'asc' ? '↑' : '↓')}
     </th>
   );
@@ -519,7 +528,7 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
           </div>
           <div><FilterLabel>Market</FilterLabel>
             <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All markets</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+              <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
             </select>
           </div>
           <div><FilterLabel>Team</FilterLabel>
@@ -530,29 +539,29 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
           </div>
           <div><FilterLabel>Status</FilterLabel>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All status</option><option value="Active">Active</option><option value="Onboarding">Onboarding</option>
+              <option value="ALL">All</option><option value="Active">Active</option><option value="Onboarding">Onboarding</option>
             </select>
           </div>
           <div><FilterLabel>Skill</FilterLabel>
             <select value={skillHasFilter} onChange={(e) => setSkillHasFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ANY">Any skill</option>
-              <optgroup label="Has skill">{skills.map(s => <option key={s.id} value={s.id}>✓ {s.name}</option>)}</optgroup>
-              <optgroup label="Missing skill">{skills.map(s => <option key={`m-${s.id}`} value={`MISSING:${s.id}`}>✗ {s.name}</option>)}</optgroup>
+              <option value="ANY">Any</option>
+              <optgroup label="Has">{skills.map(s => <option key={s.id} value={s.id}>✓ {s.name}</option>)}</optgroup>
+              <optgroup label="Missing">{skills.map(s => <option key={`m-${s.id}`} value={`MISSING:${s.id}`}>✗ {s.name}</option>)}</optgroup>
             </select>
           </div>
           <div><FilterLabel>Trainer</FilterLabel>
             <select value={trainerFilter} onChange={(e) => setTrainerFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">All trainers</option><option value="NONE">No trainer</option>
+              <option value="ALL">All</option><option value="NONE">None</option>
               {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
           <div><FilterLabel>Started</FilterLabel>
             <select value={startDateFilter} onChange={(e) => setStartDateFilter(e.target.value)} style={filterSelectStyle}>
-              <option value="ALL">Any time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last 12 months</option>
+              <option value="ALL">Any</option><option value="30">Last 30d</option><option value="90">Last 90d</option><option value="365">Last 12m</option>
             </select>
           </div>
           {hasActiveFilters && (
-            <button onClick={resetFilters} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '4px', height: '34px', alignSelf: 'flex-end' }}>
+            <button onClick={resetFilters} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', height: '34px', alignSelf: 'flex-end' }}>
               <X size={12} /> Clear
             </button>
           )}
@@ -560,21 +569,21 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       </div>
 
       {isAdmin && selected.size > 0 && (
-        <div style={{ background: BRAND.orange, color: BRAND.black, padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', position: 'sticky', top: '140px', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
+        <div style={{ background: BRAND.orange, color: BRAND.black, padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', position: 'sticky', top: '140px', zIndex: 50 }}>
           <div className="display-font" style={{ fontSize: '16px' }}>
-            {selected.size} agent{selected.size === 1 ? '' : 's'} selected
+            {selected.size} selected
           </div>
           <div style={{ flex: 1 }} />
-          <button onClick={() => setBulkModal('team')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button onClick={() => setBulkModal('team')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Users2 size={12} /> Assign team
           </button>
-          <button onClick={() => setBulkModal('trainer')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button onClick={() => setBulkModal('trainer')} style={{ background: BRAND.black, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Briefcase size={12} /> Assign trainer
           </button>
-          <button onClick={() => setBulkModal('delete')} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button onClick={() => setBulkModal('delete')} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Trash2 size={12} /> Delete
           </button>
-          <button onClick={clearSelection} style={{ background: 'transparent', color: BRAND.black, border: `1px solid ${BRAND.black}`, padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Clear</button>
+          <button onClick={clearSelection} style={{ background: 'transparent', color: BRAND.black, border: `1px solid ${BRAND.black}`, padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '11px' }}>Clear</button>
         </div>
       )}
 
@@ -593,7 +602,7 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
               )}
               <SortHeader col="name">Name</SortHeader>
               <SortHeader col="market" align="center">Market</SortHeader>
-              <SortHeader col="team">Team</SortHeader>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Team</th>
               <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Status</th>
               <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999', borderBottom: `2px solid ${BRAND.orange}` }}>Skills</th>
               <SortHeader col="skillCount" align="center">#</SortHeader>
@@ -654,20 +663,13 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       {bulkModal === 'delete' && (
         <ModalShell onClose={() => !processing && setBulkModal(null)}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '22px', color: BRAND.red }}>Delete {selected.size} agent{selected.size === 1 ? '' : 's'}?</h3>
-          <div style={{ marginTop: '16px', color: '#bbb', fontSize: '13px', lineHeight: 1.5 }}>
-            This will permanently delete the selected agents and all their development timeline history. This action cannot be undone.
-          </div>
-          <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.red}`, maxHeight: '200px', overflowY: 'auto' }}>
-            {selectedAgents.map(a => (
-              <div key={a.id} style={{ fontSize: '12px', padding: '2px 0' }}>
-                <span style={{ fontWeight: 700 }}>{a.name}</span> <span style={{ color: '#999' }}>· {a.market}</span>
-              </div>
-            ))}
+          <div style={{ marginTop: '16px', color: '#bbb', fontSize: '13px' }}>
+            This will permanently delete the selected agents and all timeline history.
           </div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-            <button onClick={() => setBulkModal(null)} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-            <button onClick={handleBulkDelete} disabled={processing} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
-              {processing ? 'Deleting...' : `Delete ${selected.size} agents`}
+            <button onClick={() => setBulkModal(null)} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
+            <button onClick={handleBulkDelete} disabled={processing} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
+              {processing ? 'Deleting...' : 'Delete'}
             </button>
           </div>
         </ModalShell>
@@ -690,37 +692,25 @@ function BulkAssignModal({ title, itemName, options, selectedAgents, sharedMarke
   return (
     <ModalShell onClose={onClose}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>{title}</h3>
-      <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
-        Assigning {itemName} to <strong style={{ color: BRAND.orange }}>{selectedAgents.length} agent{selectedAgents.length === 1 ? '' : 's'}</strong>
-      </div>
       {!sharedMarket && (
         <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.red}`, fontSize: '12px', color: '#bbb' }}>
-          <strong style={{ color: BRAND.red }}>Market mismatch:</strong> The selected agents are from multiple markets. {itemName.charAt(0).toUpperCase() + itemName.slice(1)}s are country-specific — please narrow your selection to one market first.
+          <strong style={{ color: BRAND.red }}>Market mismatch:</strong> Selected agents from multiple markets. Narrow selection to one market first.
         </div>
       )}
       {sharedMarket && (
-        <>
-          <div style={{ marginTop: '16px' }}>
-            <label style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
-              {itemName} (market: {sharedMarket})
-            </label>
-            <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}
-              style={{ width: '100%', padding: '10px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '14px' }}>
-              <option value="">— Remove {itemName} —</option>
-              {availableOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-            {availableOptions.length === 0 && (
-              <div style={{ marginTop: '8px', fontSize: '11px', color: '#999', fontStyle: 'italic' }}>
-                No {itemName}s defined for {sharedMarket}.
-              </div>
-            )}
-          </div>
-        </>
+        <div style={{ marginTop: '16px' }}>
+          <FormLabel>{itemName} (market: {sharedMarket})</FormLabel>
+          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}
+            style={{ width: '100%', padding: '10px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '14px' }}>
+            <option value="">— Remove {itemName} —</option>
+            {availableOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
       )}
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
         {sharedMarket && (
-          <button onClick={() => onAssign(selectedId)} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          <button onClick={() => onAssign(selectedId)} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
             {processing ? 'Saving...' : (selectedId ? 'Assign' : 'Remove')}
           </button>
         )}
@@ -738,6 +728,7 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
+// ============ AGENT DETAIL ============
 function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
@@ -770,7 +761,7 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back to agents</button>
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
         {isAdmin && (
           <button onClick={onDeleteAgent} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Trash2 size={12} /> Delete agent
@@ -842,9 +833,9 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
 
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Development Timeline</h3>
+            <h3 className="display-font" style={{ margin: 0, fontSize: '18px' }}>Timeline</h3>
             {isAdmin && (
-              <button onClick={onAddComment} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button onClick={onAddComment} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Plus size={12} /> Add note
               </button>
             )}
@@ -863,24 +854,14 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, se
                     <div style={{ background: BRAND.black, padding: '12px 14px', borderLeft: `3px solid ${color}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                         <div style={{ fontWeight: 700, fontSize: '13px' }}>{event.title}</div>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{formatDate(event.date)}</div>
-                          {isAdmin && (
-                            <button onClick={() => deleteTimelineEvent(agent.id, event.id)} style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px' }}>
-                              <X size={12} />
-                            </button>
-                          )}
-                        </div>
+                        <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>{formatDate(event.date)}</div>
                       </div>
                       {event.note && <div style={{ fontSize: '12px', color: '#bbb', marginTop: '6px', fontStyle: 'italic' }}>"{event.note}"</div>}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px' }}>
-                        <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', color, fontWeight: 700 }}>{event.type}</div>
-                        {event.createdBy && (
-                          <div style={{ fontSize: '10px', color: '#888', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            <User size={9} /> by <span style={{ color: BRAND.orange, fontWeight: 700 }}>{event.createdBy}</span>
-                          </div>
-                        )}
-                      </div>
+                      {event.createdBy && (
+                        <div style={{ fontSize: '10px', color: '#888', marginTop: '6px' }}>
+                          <User size={9} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />by <span style={{ color: BRAND.orange, fontWeight: 700 }}>{event.createdBy}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -906,17 +887,490 @@ function InfoPill({ icon: Icon, label, children }) {
   );
 }
 
+// ============ RECRUITMENT LIST VIEW ============
+function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRecruitment, onNewRecruitment }) {
+  const [marketFilter, setMarketFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  const filtered = useMemo(() => {
+    return recruitments.filter(r => {
+      if (marketFilter !== 'ALL' && r.market !== marketFilter) return false;
+      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      return true;
+    });
+  }, [recruitments, marketFilter, statusFilter]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            Recruitments · {recruitments.length} total
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+            Recruitment <span style={{ color: BRAND.orange }}>pipeline</span>
+          </h2>
+          <div style={{ fontSize: '13px', color: '#bbb', marginTop: '8px', maxWidth: '600px' }}>
+            Manage hiring campaigns, candidate slots and trainers per recruitment.
+          </div>
+        </div>
+        <button onClick={onNewRecruitment} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Plus size={14} /> New recruitment
+        </button>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div>
+          <FilterLabel>Market</FilterLabel>
+          <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All markets</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Status</FilterLabel>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All statuses</option>
+            <option value="Initiated">Initiated</option>
+            <option value="Live">Live</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
+        {filtered.map(r => {
+          const hiredCount = (r.candidates || []).filter(c => c.status === 'hired').length;
+          const totalCount = r.targetCount || 0;
+          const pct = totalCount > 0 ? (hiredCount / totalCount) * 100 : 0;
+          const trainerNames = (r.trainerIds || []).map(id => trainers.find(t => t.id === id)?.name).filter(Boolean);
+          const recruiterNames = (r.recruiterIds || []).map(id => recruiters.find(rc => rc.id === id)?.name).filter(Boolean);
+          const daysToDeadline = daysUntil(r.applicationDeadline);
+          const daysToStart = daysUntil(r.classStartDate);
+
+          return (
+            <div key={r.id} onClick={() => setSelectedRecruitment(r.id)} className="hover-lift"
+              style={{ background: BRAND.grey, border: `1px solid #333`, borderTop: `3px solid ${recruitmentStatusColor(r.status)}`, padding: '20px', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                <div>
+                  <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>{r.name}</h3>
+                  <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>{r.market}</div>
+                </div>
+                <span style={{ fontSize: '9px', padding: '3px 8px', background: recruitmentStatusColor(r.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
+                  {r.status}
+                </span>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                  <span style={{ fontWeight: 700 }}>Progress</span>
+                  <span style={{ color: '#999' }}>
+                    <span style={{ color: BRAND.orange, fontWeight: 700 }}>{hiredCount}</span> of {totalCount} hired
+                  </span>
+                </div>
+                <div style={{ position: 'relative', height: '8px', background: '#1a1a1a' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: BRAND.orange, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', marginBottom: '12px' }}>
+                {r.applicationDeadline && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deadline</div>
+                    <div style={{ fontWeight: 700, color: daysToDeadline !== null && daysToDeadline < 0 ? BRAND.red : daysToDeadline !== null && daysToDeadline < 7 ? BRAND.yellow : BRAND.white }}>
+                      {formatDate(r.applicationDeadline)}
+                    </div>
+                  </div>
+                )}
+                {r.classStartDate && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Class starts</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {formatDate(r.classStartDate)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {(recruiterNames.length > 0 || trainerNames.length > 0) && (
+                <div style={{ paddingTop: '12px', borderTop: `1px solid #333`, fontSize: '11px' }}>
+                  {recruiterNames.length > 0 && (
+                    <div style={{ marginBottom: '4px', color: '#bbb' }}>
+                      <UserCog size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                      <strong>Recruiters:</strong> {recruiterNames.join(', ')}
+                    </div>
+                  )}
+                  {trainerNames.length > 0 && (
+                    <div style={{ color: '#bbb' }}>
+                      <Briefcase size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                      <strong>Trainers:</strong> {trainerNames.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
+            {recruitments.length === 0 ? 'No recruitments yet — click "New recruitment".' : 'No recruitments match filters.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ RECRUITMENT DETAIL VIEW ============
+function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, onBack }) {
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [error, setError] = useState('');
+  const [processing, setProcessing] = useState(false);
+
+  const rec = recruitments.find(r => r.id === recruitmentId);
+  if (!rec) return (
+    <div>
+      <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>← Back</button>
+      <div style={{ padding: '40px', color: '#999', textAlign: 'center' }}>Recruitment not found</div>
+    </div>
+  );
+
+  const hiredCount = (rec.candidates || []).filter(c => c.status === 'hired').length;
+  const totalCount = rec.targetCount || 0;
+  const pct = totalCount > 0 ? (hiredCount / totalCount) * 100 : 0;
+  const assignedRecruiters = recruiters.filter(r => (rec.recruiterIds || []).includes(r.id));
+  const assignedTrainers = trainers.filter(t => (rec.trainerIds || []).includes(t.id));
+  const availableRecruiters = recruiters.filter(r => r.market === rec.market);
+  const availableTrainers = trainers.filter(t => t.market === rec.market);
+
+  const startEdit = () => {
+    setEditForm({
+      name: rec.name,
+      applicationDeadline: rec.applicationDeadline || '',
+      classStartDate: rec.classStartDate || '',
+      recruiterIds: rec.recruiterIds || [],
+      trainerIds: rec.trainerIds || [],
+      status: rec.status,
+    });
+    setEditMode(true);
+  };
+
+  const saveEdit = async () => {
+    setError(''); setProcessing(true);
+    try { await updateRecruitment(recruitmentId, editForm); setEditMode(false); }
+    catch (err) { setError(err.message); } finally { setProcessing(false); }
+  };
+
+  const handleStatusChange = async (newStatus) => {
+    await updateRecruitment(recruitmentId, { status: newStatus });
+  };
+
+  const handleDelete = async () => {
+    if (confirm(`Delete recruitment "${rec.name}"? Linked agents will NOT be deleted.`)) {
+      await deleteRecruitment(recruitmentId);
+      onBack();
+    }
+  };
+
+  const toggleInForm = (field, id) => {
+    const current = editForm[field] || [];
+    setEditForm({ ...editForm, [field]: current.includes(id) ? current.filter(x => x !== id) : [...current, id] });
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>← Back</button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {!editMode && (
+            <button onClick={startEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Edit3 size={12} /> Edit
+            </button>
+          )}
+          <button onClick={handleDelete} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+          Recruitment · {rec.market} · <span style={{ color: recruitmentStatusColor(rec.status) }}>{rec.status}</span>
+        </div>
+        <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{rec.name}</h2>
+      </div>
+
+      {editMode ? (
+        <div style={{ background: BRAND.grey, padding: '24px', border: `2px solid ${BRAND.orange}`, marginBottom: '24px' }}>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>Edit recruitment</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
+            <div>
+              <FormLabel>Name</FormLabel>
+              <input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+              <div>
+                <FormLabel>Application deadline</FormLabel>
+                <input type="date" value={editForm.applicationDeadline} onChange={(e) => setEditForm({...editForm, applicationDeadline: e.target.value})}
+                  style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+              </div>
+              <div>
+                <FormLabel>Class start date</FormLabel>
+                <input type="date" value={editForm.classStartDate} onChange={(e) => setEditForm({...editForm, classStartDate: e.target.value})}
+                  style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+              </div>
+              <div>
+                <FormLabel>Status</FormLabel>
+                <select value={editForm.status} onChange={(e) => setEditForm({...editForm, status: e.target.value})}
+                  style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+                  <option value="Initiated">Initiated</option>
+                  <option value="Live">Live</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <FormLabel>Recruiters (market: {rec.market})</FormLabel>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444` }}>
+                {availableRecruiters.map(r => {
+                  const isChecked = editForm.recruiterIds.includes(r.id);
+                  return (
+                    <button key={r.id} type="button" onClick={() => toggleInForm('recruiterIds', r.id)}
+                      style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
+                      {r.name}
+                    </button>
+                  );
+                })}
+                {availableRecruiters.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No recruiters for {rec.market}</span>}
+              </div>
+            </div>
+            <div>
+              <FormLabel>Trainers (market: {rec.market})</FormLabel>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444` }}>
+                {availableTrainers.map(t => {
+                  const isChecked = editForm.trainerIds.includes(t.id);
+                  return (
+                    <button key={t.id} type="button" onClick={() => toggleInForm('trainerIds', t.id)}
+                      style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
+                      {t.name}
+                    </button>
+                  );
+                })}
+                {availableTrainers.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No trainers for {rec.market}</span>}
+              </div>
+            </div>
+          </div>
+          {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditMode(false)} disabled={processing} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '10px 20px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
+            <button onClick={saveEdit} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Save</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${BRAND.orange}` }}>
+            <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Progress</div>
+            <div className="display-font" style={{ fontSize: '32px', color: BRAND.orange, marginTop: '4px', lineHeight: 1 }}>
+              {hiredCount}<span style={{ color: '#666', fontSize: '20px' }}>/{totalCount}</span>
+            </div>
+            <div style={{ marginTop: '8px', height: '6px', background: '#1a1a1a' }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: BRAND.orange }} />
+            </div>
+            <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>{pct.toFixed(0)}% hired</div>
+          </div>
+          {rec.applicationDeadline && (
+            <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${BRAND.yellow}` }}>
+              <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Deadline</div>
+              <div className="display-font" style={{ fontSize: '18px', color: BRAND.yellow, marginTop: '4px', lineHeight: 1.2 }}>
+                {formatDate(rec.applicationDeadline)}
+              </div>
+            </div>
+          )}
+          {rec.classStartDate && (
+            <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${BRAND.red}` }}>
+              <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Class starts</div>
+              <div className="display-font" style={{ fontSize: '18px', color: BRAND.red, marginTop: '4px', lineHeight: 1.2 }}>
+                {formatDate(rec.classStartDate)}
+              </div>
+            </div>
+          )}
+          <div style={{ background: BRAND.grey, padding: '20px', border: `1px solid #333`, borderTop: `3px solid ${recruitmentStatusColor(rec.status)}` }}>
+            <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '6px' }}>Status</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {['Initiated', 'Live', 'Completed'].map(s => (
+                <button key={s} onClick={() => handleStatusChange(s)}
+                  style={{
+                    background: rec.status === s ? recruitmentStatusColor(s) : 'transparent',
+                    color: rec.status === s ? BRAND.black : BRAND.white,
+                    border: `1px solid ${rec.status === s ? recruitmentStatusColor(s) : '#555'}`,
+                    padding: '4px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase',
+                  }}>
+                  {rec.status === s && <Check size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />}
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <InfoPill icon={UserCog} label={`Recruiters (${assignedRecruiters.length})`}>
+          {assignedRecruiters.length > 0
+            ? <span style={{ fontWeight: 700 }}>{assignedRecruiters.map(r => r.name).join(', ')}</span>
+            : <em style={{ color: '#666' }}>None</em>}
+        </InfoPill>
+        <InfoPill icon={Briefcase} label={`Trainers (${assignedTrainers.length})`}>
+          {assignedTrainers.length > 0
+            ? <span style={{ fontWeight: 700 }}>{assignedTrainers.map(t => t.name).join(', ')}</span>
+            : <em style={{ color: '#666' }}>None</em>}
+        </InfoPill>
+      </div>
+
+      {/* Candidate slots — preview only in this iteration, no convert action yet */}
+      <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
+        <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>Candidate slots ({rec.candidates?.length || 0})</h3>
+        <div style={{ padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.yellow}`, fontSize: '12px', color: '#bbb', marginBottom: '16px' }}>
+          <strong style={{ color: BRAND.yellow }}>Coming in next round:</strong> Convert candidates to agents will be added in the next deploy.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px' }}>
+          {(rec.candidates || []).map(slot => (
+            <div key={slot.slotNumber} style={{
+              background: BRAND.black,
+              border: `1px solid ${slot.status === 'hired' ? BRAND.orange : '#333'}`,
+              borderLeft: `3px solid ${slot.status === 'hired' ? BRAND.orange : '#555'}`,
+              padding: '10px 14px',
+            }}>
+              <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Slot #{slot.slotNumber}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: '13px', marginTop: '4px', color: slot.status === 'hired' ? BRAND.orange : '#999', fontStyle: slot.status === 'hired' ? 'normal' : 'italic' }}>
+                {slot.status === 'hired' ? (slot.hiredName || 'Hired') : `Candidate ${slot.slotNumber}`}
+              </div>
+            </div>
+          ))}
+          {(rec.candidates || []).length === 0 && (
+            <div style={{ gridColumn: '1 / -1', padding: '20px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No slots</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewRecruitmentModal({ recruiters, trainers, onClose }) {
+  const [form, setForm] = useState({
+    name: '', market: 'DK', targetCount: 10,
+    applicationDeadline: '', classStartDate: '',
+    recruiterIds: [], trainerIds: [],
+  });
+  const [error, setError] = useState('');
+  const [processing, setProcessing] = useState(false);
+
+  const availableRecruiters = recruiters.filter(r => r.market === form.market);
+  const availableTrainers = trainers.filter(t => t.market === form.market);
+
+  const toggleInForm = (field, id) => {
+    const current = form[field] || [];
+    setForm({ ...form, [field]: current.includes(id) ? current.filter(x => x !== id) : [...current, id] });
+  };
+
+  const save = async () => {
+    setError('');
+    if (!form.name.trim()) { setError('Name is required'); return; }
+    if (!form.targetCount || form.targetCount < 1) { setError('Target count must be at least 1'); return; }
+    setProcessing(true);
+    try { await createRecruitment(form); onClose(); }
+    catch (err) { setError(err.message); setProcessing(false); }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>New recruitment</h3>
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <FormField label="Recruitment name *" required value={form.name} onChange={(v) => setForm({...form, name: v})} placeholder="e.g. DK Spring intake 2026" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div>
+            <FormLabel>Market *</FormLabel>
+            <select value={form.market} onChange={(e) => setForm({...form, market: e.target.value, recruiterIds: [], trainerIds: []})}
+              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+              {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <FormLabel>Target hires *</FormLabel>
+            <input type="number" min="1" max="100" value={form.targetCount}
+              onChange={(e) => setForm({...form, targetCount: parseInt(e.target.value) || 0})}
+              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div>
+            <FormLabel>Application deadline</FormLabel>
+            <input type="date" value={form.applicationDeadline} onChange={(e) => setForm({...form, applicationDeadline: e.target.value})}
+              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+          </div>
+          <div>
+            <FormLabel>Class start date</FormLabel>
+            <input type="date" value={form.classStartDate} onChange={(e) => setForm({...form, classStartDate: e.target.value})}
+              style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+          </div>
+        </div>
+        <div>
+          <FormLabel>Recruiters (market: {form.market})</FormLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444`, minHeight: '40px' }}>
+            {availableRecruiters.map(r => {
+              const isChecked = form.recruiterIds.includes(r.id);
+              return (
+                <button key={r.id} type="button" onClick={() => toggleInForm('recruiterIds', r.id)}
+                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
+                  {r.name}
+                </button>
+              );
+            })}
+            {availableRecruiters.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No recruiters for {form.market} — create them in Admin first</span>}
+          </div>
+        </div>
+        <div>
+          <FormLabel>Trainers (market: {form.market})</FormLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444`, minHeight: '40px' }}>
+            {availableTrainers.map(t => {
+              const isChecked = form.trainerIds.includes(t.id);
+              return (
+                <button key={t.id} type="button" onClick={() => toggleInForm('trainerIds', t.id)}
+                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
+                  {t.name}
+                </button>
+              );
+            })}
+            {availableTrainers.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No trainers for {form.market} — create them in Admin first</span>}
+          </div>
+        </div>
+      </div>
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
+          {processing ? 'Creating...' : 'Create recruitment'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ============ SKILL VIEWS ============
 function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>All Skills · {skillStats.length} paths</div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>All Skills · {skillStats.length}</div>
           <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>Skill <span style={{ color: BRAND.orange }}>paths</span></h2>
         </div>
         {isAdmin && (
           <button onClick={onManageSkills} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Settings size={14} /> Manage skills
+            <Settings size={14} /> Manage
           </button>
         )}
       </div>
@@ -931,11 +1385,11 @@ function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }
               <div style={{ fontSize: '12px', color: '#999', marginBottom: '16px' }}>{s.description}</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Target</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Target</div>
                   <div className="display-font" style={{ fontSize: '24px', color: statusColor }}>{s.targetVolumePct}%</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual</div>
+                  <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase' }}>Actual</div>
                   <div className="display-font" style={{ fontSize: '24px', color: BRAND.white }}>{s.actualPct.toFixed(0)}%</div>
                 </div>
               </div>
@@ -953,7 +1407,7 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
   const agentsWithout = agents.filter(a => !(a.skills || []).includes(skill.id));
   return (
     <div>
-      <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', marginBottom: '20px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+      <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', marginBottom: '20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>← Back</button>
       <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 16px', lineHeight: 1 }}>{skill.name}</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
         <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
@@ -1015,6 +1469,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
   );
 }
 
+// ============ ADMIN ============
 function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams, onManageTrainers, onManageRecruiters }) {
   const [users, setUsers] = useState([]);
   const [showNew, setShowNew] = useState(false);
@@ -1077,13 +1532,13 @@ function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams
               <select value={form.role} onChange={(e) => setForm({...form, role: e.target.value})}
                 style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
                 <option value="reader">Reader</option>
-                <option value="admin">Admin (Trainer)</option>
+                <option value="admin">Admin</option>
               </select>
             </div>
           </div>
           {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Create</button>
+            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Create</button>
             <button type="button" onClick={() => setShowNew(false)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '10px 20px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
           </div>
         </form>
@@ -1107,10 +1562,10 @@ function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams
                 <td style={{ padding: '12px 16px', fontWeight: 700 }}>{u.displayName}</td>
                 <td style={{ padding: '12px 16px', color: '#999', fontFamily: 'monospace' }}>{u.username}</td>
                 <td style={{ padding: '12px 16px' }}>
-                  <span style={{ fontSize: '10px', padding: '3px 8px', background: u.role === 'admin' ? BRAND.orange : '#444', color: u.role === 'admin' ? BRAND.black : BRAND.white, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>{u.role}</span>
+                  <span style={{ fontSize: '10px', padding: '3px 8px', background: u.role === 'admin' ? BRAND.orange : '#444', color: u.role === 'admin' ? BRAND.black : BRAND.white, textTransform: 'uppercase', fontWeight: 700 }}>{u.role}</span>
                 </td>
                 <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                  <button onClick={() => handleDelete(u.id, u.displayName)} style={{ background: 'transparent', border: `1px solid #555`, color: '#999', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
+                  <button onClick={() => handleDelete(u.id, u.displayName)} style={{ background: 'transparent', border: `1px solid #555`, color: '#999', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', textTransform: 'uppercase', fontWeight: 700 }}>
                     <Trash2 size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} /> Delete
                   </button>
                 </td>
@@ -1133,7 +1588,7 @@ function AdminActionCard({ icon: Icon, title, count, label, onClick }) {
       </div>
       <div className="display-font" style={{ fontSize: '36px', color: BRAND.orange, lineHeight: 1 }}>{count}</div>
       <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>{label}</div>
-      <div style={{ fontSize: '11px', color: BRAND.orange, marginTop: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <div style={{ fontSize: '11px', color: BRAND.orange, marginTop: '12px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
         Manage <ChevronRight size={12} />
       </div>
     </div>
@@ -1178,9 +1633,9 @@ function CommentModal({ agentId, session, onClose }) {
           <FormLabel>Type</FormLabel>
           <select value={type} onChange={(e) => setType(e.target.value)}
             style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
-            <option value="comment">Comment / Note</option>
-            <option value="training">Training event</option>
-            <option value="onboarding">Onboarding milestone</option>
+            <option value="comment">Comment</option>
+            <option value="training">Training</option>
+            <option value="onboarding">Onboarding</option>
           </select>
         </div>
         <div>
@@ -1189,12 +1644,11 @@ function CommentModal({ agentId, session, onClose }) {
             style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
         </div>
       </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)}
-        placeholder="Write a note..."
-        style={{ width: '100%', minHeight: '120px', marginTop: '12px', padding: '12px', background: BRAND.black, color: BRAND.white, border: `1px solid ${BRAND.orange}`, fontFamily: 'inherit', fontSize: '14px', resize: 'vertical' }} />
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a note..."
+        style={{ width: '100%', minHeight: '120px', marginTop: '12px', padding: '12px', background: BRAND.black, color: BRAND.white, border: `1px solid ${BRAND.orange}`, fontFamily: 'inherit', fontSize: '14px' }} />
       <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Save note</button>
+        <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Save</button>
       </div>
     </ModalShell>
   );
@@ -1202,8 +1656,6 @@ function CommentModal({ agentId, session, onClose }) {
 
 function NewAgentModal({ session, teams, trainers, onClose }) {
   const [form, setForm] = useState({ name: '', market: 'DK', startDate: new Date().toISOString().split('T')[0], status: 'Onboarding', teamId: '', trainerId: '' });
-  const availableTeams = teams.filter(t => t.market === form.market);
-  const availableTrainers = trainers.filter(t => t.market === form.market);
   const save = async () => {
     if (!form.name.trim()) return;
     await createAgent({ ...form, teamId: form.teamId || null, trainerId: form.trainerId || null, actorName: session.displayName });
@@ -1217,7 +1669,7 @@ function NewAgentModal({ session, teams, trainers, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           <div>
             <FormLabel>Market</FormLabel>
-            <select value={form.market} onChange={(e) => setForm({...form, market: e.target.value, teamId: '', trainerId: ''})}
+            <select value={form.market} onChange={(e) => setForm({...form, market: e.target.value})}
               style={{ width: '100%', padding: '8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
               {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
             </select>
@@ -1238,14 +1690,14 @@ function NewAgentModal({ session, teams, trainers, onClose }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
-        <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Create agent</button>
+        <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Create</button>
       </div>
     </ModalShell>
   );
 }
 
-// ============ Generic Manage Modal (shared by Skills/Teams/Trainers/Recruiters) ============
+// Manage modals reuse SimpleManageModal for simple cases
 function ManageSkillsModal({ skills, skillStats, onClose }) {
   return <SimpleManageModal title="Manage skills" items={skills}
     columns={[{ key: 'name', label: 'Name' }, { key: 'description', label: 'Description' }, { key: 'targetVolumePct', label: 'Target %', isNumber: true, width: '90px' }]}
@@ -1300,7 +1752,7 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
     <ModalShell onClose={onClose} wide>
       <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '24px' }}>Manage trainers</h3>
       {!showNew && (
-        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
           <Plus size={14} /> New trainer
         </button>
       )}
@@ -1322,9 +1774,7 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
               const isChecked = (newForm.certifiedSkills || []).includes(s.id);
               return (
                 <button key={s.id} type="button" onClick={() => toggleSkill(newForm, setNewForm, s.id)}
-                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>
-                  {s.name}
-                </button>
+                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>{s.name}</button>
               );
             })}
           </div>
@@ -1341,7 +1791,7 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
             <tr style={{ background: '#1a1a1a' }}>
               <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Name</th>
               <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Market</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Certified skills</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Skills</th>
               <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', color: '#999' }}></th>
             </tr>
           </thead>
@@ -1400,7 +1850,6 @@ function ManageTrainersModal({ trainers, skills, onClose }) {
   );
 }
 
-// Generic CRUD modal for simple types (Teams, Recruiters, Skills)
 function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate, onDelete, onClose, getUsageCount, usageBlocksDelete, usageLabel }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -1421,7 +1870,7 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
   const handleDelete = async (item) => {
     if (usageBlocksDelete && getUsageCount) {
       const count = getUsageCount(item);
-      if (count > 0) { alert(`Cannot delete: ${count} ${usageLabel} are using this. Reassign first.`); return; }
+      if (count > 0) { alert(`Cannot delete: ${count} ${usageLabel} are using this.`); return; }
     }
     if (confirm(`Delete "${item.name}"?`)) {
       try { await onDelete(item.id); } catch (err) { setError(err.message); }
@@ -1429,19 +1878,16 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
   };
   const handleCreate = async (e) => {
     e.preventDefault(); setError('');
-    if (!newForm.name?.trim()) { setError('Name is required'); return; }
+    if (!newForm.name?.trim()) { setError('Name required'); return; }
     try { await onCreate(newForm); setNewForm(defaults); setShowNew(false); }
     catch (err) { setError(err.message); }
   };
 
   return (
     <ModalShell onClose={onClose} wide>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>{title}</h3>
-        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', padding: '4px' }}><X size={18} /></button>
-      </div>
+      <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '24px' }}>{title}</h3>
       {!showNew && (
-        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
           <Plus size={14} /> New
         </button>
       )}
@@ -1466,7 +1912,7 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
             ))}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase' }}>Create</button>
+            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Create</button>
             <button type="button" onClick={() => { setShowNew(false); setError(''); }} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '8px 16px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
           </div>
         </form>
@@ -1477,9 +1923,9 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
           <thead>
             <tr style={{ background: '#1a1a1a' }}>
               {columns.map(col => (
-                <th key={col.key} style={{ padding: '10px 12px', textAlign: col.isNumber ? 'center' : 'left', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#999' }}>{col.label}</th>
+                <th key={col.key} style={{ padding: '10px 12px', textAlign: col.isNumber ? 'center' : 'left', fontSize: '10px', textTransform: 'uppercase', color: '#999' }}>{col.label}</th>
               ))}
-              {getUsageCount && <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', textTransform: 'uppercase', color: '#999' }}>{usageLabel}</th>}
+              {getUsageCount && <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '10px', color: '#999' }}>{usageLabel}</th>}
               <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', color: '#999' }}></th>
             </tr>
           </thead>
@@ -1506,7 +1952,7 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
                   ))}
                   {getUsageCount && <td style={{ padding: '8px 12px', textAlign: 'center', color: '#999' }}>{usageCount}</td>}
                   <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                    <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', marginRight: '4px' }}>Save</button>
+                    <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Save</button>
                     <button onClick={() => setEditingId(null)} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
                   </td>
                 </tr>
@@ -1527,7 +1973,7 @@ function SimpleManageModal({ title, items, columns, defaults, onCreate, onUpdate
                 </tr>
               );
             })}
-            {items.length === 0 && <tr><td colSpan={columns.length + (getUsageCount ? 2 : 1)} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No items yet — click "New" to create one</td></tr>}
+            {items.length === 0 && <tr><td colSpan={columns.length + (getUsageCount ? 2 : 1)} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No items yet</td></tr>}
           </tbody>
         </table>
       </div>
