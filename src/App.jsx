@@ -5,7 +5,7 @@ import {
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
   Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
-  Megaphone, MinusCircle, Unlink,
+  Megaphone, MinusCircle, Unlink, BookOpen,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
@@ -17,6 +17,7 @@ import {
   createTrainer, updateTrainer, deleteTrainer,
   createRecruiter, updateRecruiter, deleteRecruiter,
   subscribeCourseTypes, createCourseType, updateCourseType, deleteCourseType,
+  subscribeCourses, createCourse, updateCourse, deleteCourse,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -65,6 +66,16 @@ const recruitmentStatusColor = (status) => {
     case 'Initiated': return BRAND.yellow;
     case 'Live': return BRAND.orange;
     case 'Completed': return '#4ade80';
+    default: return '#666';
+  }
+};
+
+const courseStatusColor = (status) => {
+  switch (status) {
+    case 'Planned': return BRAND.yellow;
+    case 'In progress': return BRAND.orange;
+    case 'Completed': return '#4ade80';
+    case 'Cancelled': return '#666';
     default: return '#666';
   }
 };
@@ -131,10 +142,12 @@ function Dashboard({ session, onLogout }) {
   const [recruiters, setRecruiters] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
   const [courseTypes, setCourseTypes] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
   const [selectedRecruitment, setSelectedRecruitment] = useState(null);
+  const [selectedCourse, setSelectedCourse] = useState(null);
   const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -147,8 +160,9 @@ function Dashboard({ session, onLogout }) {
     const unsubRecruiters = subscribeRecruiters(setRecruiters);
     const unsubRecruitments = subscribeRecruitments(setRecruitments);
     const unsubCourseTypes = subscribeCourseTypes(setCourseTypes);
+    const unsubCourses = subscribeCourses(setCourses);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); };
+    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses(); };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -222,12 +236,13 @@ function Dashboard({ session, onLogout }) {
             { id: 'skill', label: 'Skill View', icon: Target },
             { id: 'matrix', label: 'Skill Matrix', icon: Activity },
             ...(isAdmin ? [{ id: 'recruitment', label: 'Recruitments', icon: Megaphone }] : []),
+            ...(isAdmin ? [{ id: 'course', label: 'Courses', icon: BookOpen }] : []),
             ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: Settings }] : []),
           ].map(tab => {
             const Icon = tab.icon;
             const active = view === tab.id;
             return (
-              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); }}
+              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); setSelectedCourse(null); }}
                 style={{ background: 'transparent', color: active ? BRAND.orange : '#999', border: 'none', borderBottom: `3px solid ${active ? BRAND.orange : 'transparent'}`, padding: '12px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 <Icon size={15} /> {tab.label}
               </button>
@@ -292,6 +307,16 @@ function Dashboard({ session, onLogout }) {
             onRemoveSlot={(slot) => setModal({ type: 'removeSlot', slot, recruitmentId: selectedRecruitment })}
             onRevertSlot={(slot) => setModal({ type: 'revertSlot', slot, recruitmentId: selectedRecruitment })} />
         )}
+        {view === 'course' && isAdmin && !selectedCourse && (
+          <CourseListView courses={courses} courseTypes={courseTypes} trainers={trainers}
+            setSelectedCourse={setSelectedCourse}
+            onNewCourse={() => setModal({ type: 'newCourse' })} />
+        )}
+        {view === 'course' && isAdmin && selectedCourse && (
+          <CourseDetailView courseId={selectedCourse} courses={courses} courseTypes={courseTypes}
+            trainers={trainers} agents={agents} skills={skills} session={session}
+            onBack={() => setSelectedCourse(null)} />
+        )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters} courseTypes={courseTypes}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
@@ -308,6 +333,7 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
       {modal?.type === 'manageCourseTypes' && <ManageCourseTypesModal courseTypes={courseTypes} skills={skills} onClose={() => setModal(null)} />}
+      {modal?.type === 'newCourse' && <NewCourseModal courseTypes={courseTypes} trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -329,7 +355,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.8 · Learning Operations</span>
+        <span>POWER · Control Tower v1.9 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -1683,6 +1709,370 @@ function NewRecruitmentModal({ recruiters, trainers, onClose }) {
         <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
         <button onClick={save} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
           {processing ? 'Creating...' : 'Create'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ============ COURSES (C2) ============
+
+function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onNewCourse }) {
+  const [marketFilter, setMarketFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [trainerFilter, setTrainerFilter] = useState('ALL');
+
+  const filtered = useMemo(() => {
+    return courses.filter(c => {
+      if (marketFilter !== 'ALL' && c.market !== marketFilter) return false;
+      if (statusFilter !== 'ALL' && c.status !== statusFilter) return false;
+      if (typeFilter !== 'ALL') {
+        if (typeFilter === 'NONE' && c.courseTypeId) return false;
+        if (typeFilter !== 'NONE' && c.courseTypeId !== typeFilter) return false;
+      }
+      if (trainerFilter !== 'ALL') {
+        if (trainerFilter === 'NONE' && c.trainerId) return false;
+        if (trainerFilter !== 'NONE' && c.trainerId !== trainerFilter) return false;
+      }
+      return true;
+    });
+  }, [courses, marketFilter, statusFilter, typeFilter, trainerFilter]);
+
+  const hasFilters = marketFilter !== 'ALL' || statusFilter !== 'ALL' || typeFilter !== 'ALL' || trainerFilter !== 'ALL';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            Courses · {courses.length} total
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+            Course <span style={{ color: BRAND.orange }}>schedule</span>
+          </h2>
+        </div>
+        <button onClick={onNewCourse} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Plus size={14} /> New course
+        </button>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <FilterLabel>Market</FilterLabel>
+          <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Type</FilterLabel>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option>
+            <option value="NONE">No type</option>
+            {courseTypes.map(ct => <option key={ct.id} value={ct.id}>{ct.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Status</FilterLabel>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option>
+            <option value="Planned">Planned</option>
+            <option value="In progress">In progress</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Trainer</FilterLabel>
+          <select value={trainerFilter} onChange={(e) => setTrainerFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="NONE">None</option>
+            {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        {hasFilters && (
+          <button onClick={() => { setMarketFilter('ALL'); setStatusFilter('ALL'); setTypeFilter('ALL'); setTrainerFilter('ALL'); }}
+            style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', height: '34px' }}>
+            <X size={12} /> Clear
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
+        {filtered.map(c => {
+          const courseType = courseTypes.find(ct => ct.id === c.courseTypeId);
+          const trainer = trainers.find(t => t.id === c.trainerId);
+          const enrolledCount = (c.enrolledAgentIds || []).length;
+
+          return (
+            <div key={c.id} onClick={() => setSelectedCourse(c.id)} className="hover-lift"
+              style={{ background: BRAND.grey, border: `1px solid #333`, borderTop: `3px solid ${courseStatusColor(c.status)}`, padding: '20px', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', gap: '8px' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <h3 className="display-font" style={{ margin: 0, fontSize: '20px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</h3>
+                  <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
+                    {c.market} {courseType && <>· {courseType.name}</>}
+                  </div>
+                </div>
+                <span style={{ fontSize: '9px', padding: '3px 8px', background: courseStatusColor(c.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {c.status}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', marginBottom: '12px' }}>
+                {c.startDate && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Starts</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(c.startDate)}</div>
+                  </div>
+                )}
+                {c.endDate && (
+                  <div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Ends</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(c.endDate)}</div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ paddingTop: '12px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                <div style={{ color: '#bbb' }}>
+                  <Briefcase size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                  {trainer ? trainer.name : <em style={{ color: '#666' }}>No trainer</em>}
+                </div>
+                <div style={{ color: '#bbb' }}>
+                  <Users size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
+                  <strong style={{ color: BRAND.orange }}>{enrolledCount}</strong> enrolled
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
+            {courses.length === 0 ? 'No courses yet — click "New course" to schedule your first one.' : 'No courses match filters.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack }) {
+  const course = courses.find(c => c.id === courseId);
+  if (!course) return null;
+
+  const courseType = courseTypes.find(ct => ct.id === course.courseTypeId);
+  const trainer = trainers.find(t => t.id === course.trainerId);
+  const enrolledAgents = (course.enrolledAgentIds || []).map(id => agents.find(a => a.id === id)).filter(Boolean);
+  const courseSkills = skills.filter(s => (course.skillIds || []).includes(s.id));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        <div style={{ width: '80px', height: '80px', background: BRAND.orange, color: BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="display-font">
+          <BookOpen size={36} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            {course.market}{courseType && <> · {courseType.name}</>}
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{course.name}</h2>
+          <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
+            <span style={{ background: courseStatusColor(course.status), color: BRAND.black, padding: '2px 8px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginRight: '8px' }}>
+              {course.status}
+            </span>
+            {enrolledAgents.length} enrolled · {courseSkills.length} skills
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '24px' }}>
+        <InfoPill icon={Briefcase} label="Trainer">
+          {trainer ? <span style={{ fontWeight: 700 }}>{trainer.name}</span> : <em style={{ color: '#666' }}>Not assigned</em>}
+        </InfoPill>
+        <InfoPill icon={Calendar} label="Start date">
+          {course.startDate ? <span style={{ fontWeight: 700 }}>{formatDate(course.startDate)}</span> : <em style={{ color: '#666' }}>Not set</em>}
+        </InfoPill>
+        <InfoPill icon={Calendar} label="End date">
+          {course.endDate ? <span style={{ fontWeight: 700 }}>{formatDate(course.endDate)}</span> : <em style={{ color: '#666' }}>Not set</em>}
+        </InfoPill>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.6 }}>
+        <strong style={{ color: BRAND.yellow }}>Read-only view.</strong> Enrolling agents, changing status, and time logging come in upcoming iterations. For now, you can see the course setup as configured.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
+        <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>
+            Skills awarded on completion ({courseSkills.length})
+          </h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {courseSkills.map(s => (
+              <span key={s.id} style={{ fontSize: '11px', padding: '4px 10px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700 }}>{s.name}</span>
+            ))}
+            {courseSkills.length === 0 && <em style={{ color: '#666', fontSize: '12px' }}>No skills will be assigned at completion.</em>}
+          </div>
+        </div>
+
+        <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
+          <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>
+            Enrolled agents ({enrolledAgents.length})
+          </h3>
+          {enrolledAgents.length === 0 ? (
+            <em style={{ color: '#666', fontSize: '12px' }}>No agents enrolled yet.</em>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {enrolledAgents.map(a => (
+                <div key={a.id} style={{ background: BRAND.black, padding: '8px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px' }}>
+                  <div style={{ fontWeight: 700 }}>{a.name}</div>
+                  <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{a.market} · {a.status}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewCourseModal({ courseTypes, trainers, skills, onClose }) {
+  const [form, setForm] = useState({
+    name: '',
+    courseTypeId: '',
+    market: 'DK',
+    trainerId: '',
+    startDate: '',
+    endDate: '',
+    skillIds: [],
+  });
+  const [skillsTouched, setSkillsTouched] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  // When user picks a course type, pre-fill skills with the type's defaults
+  // — but only if the user hasn't manually toggled skills yet.
+  const handleTypeChange = (typeId) => {
+    const type = courseTypes.find(ct => ct.id === typeId);
+    if (type && !skillsTouched) {
+      setForm({ ...form, courseTypeId: typeId, skillIds: type.defaultSkillIds || [] });
+    } else {
+      setForm({ ...form, courseTypeId: typeId });
+    }
+  };
+
+  const toggleSkill = (skillId) => {
+    setSkillsTouched(true);
+    const has = form.skillIds.includes(skillId);
+    setForm({ ...form, skillIds: has ? form.skillIds.filter(s => s !== skillId) : [...form.skillIds, skillId] });
+  };
+
+  // Trainers are filtered to the selected market
+  const availableTrainers = trainers.filter(t => t.market === form.market);
+
+  // If user changes market and the picked trainer is no longer in that market, clear the trainer
+  const handleMarketChange = (newMarket) => {
+    const stillValid = trainers.find(t => t.id === form.trainerId && t.market === newMarket);
+    setForm({ ...form, market: newMarket, trainerId: stillValid ? form.trainerId : '' });
+  };
+
+  const save = async () => {
+    if (!form.name.trim()) { setError('Name is required'); return; }
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      setError('End date cannot be before start date'); return;
+    }
+    setError(''); setProcessing(true);
+    try {
+      await createCourse(form);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create course');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>New course</h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        Schedule a course. Status starts as <strong>Planned</strong>; you can move it forward later.
+      </div>
+
+      <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+        <FormField label="Name *" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="e.g. Onboarding April 2026" />
+        <div>
+          <FormLabel>Market *</FormLabel>
+          <select value={form.market} onChange={(e) => handleMarketChange(e.target.value)}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            {['DK', 'NO', 'SE', 'FI'].map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Course type</FormLabel>
+          <select value={form.courseTypeId} onChange={(e) => handleTypeChange(e.target.value)}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— No type —</option>
+            {courseTypes.map(ct => <option key={ct.id} value={ct.id}>{ct.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <FormLabel>Trainer</FormLabel>
+          <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
+            <option value="">— Unassigned —</option>
+            {availableTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          {availableTrainers.length === 0 && <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {form.market}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div>
+          <FormLabel>Start date</FormLabel>
+          <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+        <div>
+          <FormLabel>End date</FormLabel>
+          <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Skills awarded on completion</FormLabel>
+        <div style={{ fontSize: '11px', color: '#999', marginBottom: '6px', lineHeight: 1.4 }}>
+          {form.courseTypeId
+            ? (skillsTouched ? 'Customised for this course.' : `Pre-filled from "${courseTypes.find(ct => ct.id === form.courseTypeId)?.name || 'type'}" — toggle to customise.`)
+            : 'Pick the skills agents will receive when this course is completed.'}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.black, border: `1px solid #444`, maxHeight: '160px', overflowY: 'auto' }}>
+          {skills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No skills defined yet</span>}
+          {skills.map(s => {
+            const isChecked = form.skillIds.includes(s.id);
+            return (
+              <button key={s.id} type="button" onClick={() => toggleSkill(s.id)}
+                style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>{s.name}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Creating...' : 'Create course'}
         </button>
       </div>
     </ModalShell>
