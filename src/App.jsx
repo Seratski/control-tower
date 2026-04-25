@@ -17,6 +17,7 @@ import {
   createTrainer, updateTrainer, deleteTrainer,
   createRecruiter, updateRecruiter, deleteRecruiter,
   createRecruitment, updateRecruitment, deleteRecruitment,
+  convertCandidateToAgent,
   addTimelineEvent, deleteTimelineEvent, deleteUser,
   bulkDeleteAgents, bulkAssignTeam, bulkAssignTrainer,
 } from './lib/data.js';
@@ -267,8 +268,9 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'recruitment' && isAdmin && selectedRecruitment && (
           <RecruitmentDetailView recruitmentId={selectedRecruitment} recruitments={recruitments}
-            trainers={trainers} recruiters={recruiters}
-            onBack={() => setSelectedRecruitment(null)} />
+            trainers={trainers} recruiters={recruiters} agents={agents} session={session}
+            onBack={() => setSelectedRecruitment(null)}
+            onConvertSlot={(slot) => setModal({ type: 'convertCandidate', slot, recruitmentId: selectedRecruitment })} />
         )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters}
@@ -285,12 +287,82 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
+      {modal?.type === 'convertCandidate' && (
+        <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
+          recruitments={recruitments} recruiters={recruiters} session={session}
+          onClose={() => setModal(null)} />
+      )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.4 · Learning Operations</span>
+        <span>POWER · Control Tower v1.5 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
+  );
+}
+
+// ============ NEW: Convert Candidate Modal ============
+function ConvertCandidateModal({ slot, recruitmentId, recruitments, recruiters, session, onClose }) {
+  const [name, setName] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const rec = recruitments.find(r => r.id === recruitmentId);
+
+  if (!rec) return null;
+
+  // Find recruiters for this recruitment for display
+  const assignedRecruiters = recruiters.filter(r => (rec.recruiterIds || []).includes(r.id));
+
+  const save = async () => {
+    if (!name.trim()) { setError('Name is required'); return; }
+    setError(''); setProcessing(true);
+    try {
+      // Pass full recruiters list — convertCandidateToAgent will filter internally
+      await convertCandidateToAgent(recruitmentId, slot.slotNumber, name, recruiters, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to convert');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Convert candidate</h3>
+      <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
+        Converting <strong style={{ color: BRAND.orange }}>Slot #{slot.slotNumber}</strong> from "{rec.name}" into a real agent.
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Agent name *</FormLabel>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
+          placeholder="First Last"
+          onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) save(); }}
+          style={{ width: '100%', padding: '10px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', fontSize: '14px' }} />
+      </div>
+
+      <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, fontSize: '11px', color: '#bbb', lineHeight: 1.6 }}>
+        <strong style={{ color: BRAND.orange }}>The new agent will be created with:</strong><br />
+        · Market: <strong>{rec.market}</strong><br />
+        · Status: <strong>Onboarding</strong><br />
+        · Start date: <strong>{rec.classStartDate ? formatDate(rec.classStartDate) : 'today'}</strong><br />
+        · Linked to recruitment: <strong>{rec.name}</strong><br />
+        {assignedRecruiters.length > 0 && (
+          <>· Recruited by: <strong>{assignedRecruiters.map(r => r.name).join(', ')}</strong></>
+        )}
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing || !name.trim()}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || !name.trim()) ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: !name.trim() ? 0.5 : 1 }}>
+          {processing ? 'Creating...' : 'Create agent'}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -384,7 +456,6 @@ function SkillGapBar({ skill }) {
   );
 }
 
-// ============ AGENT LIST (with bulk ops) ============
 function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAdmin, session, onAddAgent }) {
   const [search, setSearch] = useState('');
   const [marketFilter, setMarketFilter] = useState('ALL');
@@ -663,9 +734,7 @@ function AgentListView({ agents, skills, teams, trainers, setSelectedAgent, isAd
       {bulkModal === 'delete' && (
         <ModalShell onClose={() => !processing && setBulkModal(null)}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '22px', color: BRAND.red }}>Delete {selected.size} agent{selected.size === 1 ? '' : 's'}?</h3>
-          <div style={{ marginTop: '16px', color: '#bbb', fontSize: '13px' }}>
-            This will permanently delete the selected agents and all timeline history.
-          </div>
+          <div style={{ marginTop: '16px', color: '#bbb', fontSize: '13px' }}>This will permanently delete the selected agents.</div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
             <button onClick={() => setBulkModal(null)} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
             <button onClick={handleBulkDelete} disabled={processing} style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
@@ -694,7 +763,7 @@ function BulkAssignModal({ title, itemName, options, selectedAgents, sharedMarke
       <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>{title}</h3>
       {!sharedMarket && (
         <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.red}`, fontSize: '12px', color: '#bbb' }}>
-          <strong style={{ color: BRAND.red }}>Market mismatch:</strong> Selected agents from multiple markets. Narrow selection to one market first.
+          <strong style={{ color: BRAND.red }}>Market mismatch:</strong> Selected agents from multiple markets.
         </div>
       )}
       {sharedMarket && (
@@ -728,7 +797,6 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-// ============ AGENT DETAIL ============
 function AgentDetailView({ agentId, agents, skills, teams, trainers, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
@@ -887,7 +955,6 @@ function InfoPill({ icon: Icon, label, children }) {
   );
 }
 
-// ============ RECRUITMENT LIST VIEW ============
 function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRecruitment, onNewRecruitment }) {
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -910,9 +977,6 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
           <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
             Recruitment <span style={{ color: BRAND.orange }}>pipeline</span>
           </h2>
-          <div style={{ fontSize: '13px', color: '#bbb', marginTop: '8px', maxWidth: '600px' }}>
-            Manage hiring campaigns, candidate slots and trainers per recruitment.
-          </div>
         </div>
         <button onClick={onNewRecruitment} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Plus size={14} /> New recruitment
@@ -923,13 +987,13 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
         <div>
           <FilterLabel>Market</FilterLabel>
           <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
-            <option value="ALL">All markets</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+            <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
           </select>
         </div>
         <div>
           <FilterLabel>Status</FilterLabel>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
-            <option value="ALL">All statuses</option>
+            <option value="ALL">All</option>
             <option value="Initiated">Initiated</option>
             <option value="Live">Live</option>
             <option value="Completed">Completed</option>
@@ -944,8 +1008,6 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
           const pct = totalCount > 0 ? (hiredCount / totalCount) * 100 : 0;
           const trainerNames = (r.trainerIds || []).map(id => trainers.find(t => t.id === id)?.name).filter(Boolean);
           const recruiterNames = (r.recruiterIds || []).map(id => recruiters.find(rc => rc.id === id)?.name).filter(Boolean);
-          const daysToDeadline = daysUntil(r.applicationDeadline);
-          const daysToStart = daysUntil(r.classStartDate);
 
           return (
             <div key={r.id} onClick={() => setSelectedRecruitment(r.id)} className="hover-lift"
@@ -968,25 +1030,21 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
                   </span>
                 </div>
                 <div style={{ position: 'relative', height: '8px', background: '#1a1a1a' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: BRAND.orange, transition: 'width 0.3s' }} />
+                  <div style={{ height: '100%', width: `${pct}%`, background: BRAND.orange }} />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', marginBottom: '12px' }}>
                 {r.applicationDeadline && (
                   <div>
-                    <div style={{ color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deadline</div>
-                    <div style={{ fontWeight: 700, color: daysToDeadline !== null && daysToDeadline < 0 ? BRAND.red : daysToDeadline !== null && daysToDeadline < 7 ? BRAND.yellow : BRAND.white }}>
-                      {formatDate(r.applicationDeadline)}
-                    </div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Deadline</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(r.applicationDeadline)}</div>
                   </div>
                 )}
                 {r.classStartDate && (
                   <div>
-                    <div style={{ color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Class starts</div>
-                    <div style={{ fontWeight: 700 }}>
-                      {formatDate(r.classStartDate)}
-                    </div>
+                    <div style={{ color: '#999', textTransform: 'uppercase' }}>Class starts</div>
+                    <div style={{ fontWeight: 700 }}>{formatDate(r.classStartDate)}</div>
                   </div>
                 )}
               </div>
@@ -1012,7 +1070,7 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
         })}
         {filtered.length === 0 && (
           <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
-            {recruitments.length === 0 ? 'No recruitments yet — click "New recruitment".' : 'No recruitments match filters.'}
+            {recruitments.length === 0 ? 'No recruitments yet.' : 'No recruitments match filters.'}
           </div>
         )}
       </div>
@@ -1020,8 +1078,8 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
   );
 }
 
-// ============ RECRUITMENT DETAIL VIEW ============
-function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, onBack }) {
+// ============ RECRUITMENT DETAIL — UPDATED with Convert button ============
+function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, agents, session, onBack, onConvertSlot }) {
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState(null);
   const [error, setError] = useState('');
@@ -1142,7 +1200,6 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
                     </button>
                   );
                 })}
-                {availableRecruiters.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No recruiters for {rec.market}</span>}
               </div>
             </div>
             <div>
@@ -1157,7 +1214,6 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
                     </button>
                   );
                 })}
-                {availableTrainers.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No trainers for {rec.market}</span>}
               </div>
             </div>
           </div>
@@ -1228,28 +1284,44 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
         </InfoPill>
       </div>
 
-      {/* Candidate slots — preview only in this iteration, no convert action yet */}
+      {/* Candidate slots — UPDATED with Convert button */}
       <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-        <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>Candidate slots ({rec.candidates?.length || 0})</h3>
-        <div style={{ padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.yellow}`, fontSize: '12px', color: '#bbb', marginBottom: '16px' }}>
-          <strong style={{ color: BRAND.yellow }}>Coming in next round:</strong> Convert candidates to agents will be added in the next deploy.
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px' }}>
-          {(rec.candidates || []).map(slot => (
-            <div key={slot.slotNumber} style={{
-              background: BRAND.black,
-              border: `1px solid ${slot.status === 'hired' ? BRAND.orange : '#333'}`,
-              borderLeft: `3px solid ${slot.status === 'hired' ? BRAND.orange : '#555'}`,
-              padding: '10px 14px',
-            }}>
-              <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Slot #{slot.slotNumber}
+        <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>
+          Candidate slots ({rec.candidates?.length || 0})
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+          {(rec.candidates || []).map(slot => {
+            const linkedAgent = slot.agentId ? agents.find(a => a.id === slot.agentId) : null;
+            const isHired = slot.status === 'hired';
+            return (
+              <div key={slot.slotNumber} style={{
+                background: BRAND.black,
+                border: `1px solid ${isHired ? BRAND.orange : '#333'}`,
+                borderLeft: `3px solid ${isHired ? BRAND.orange : '#555'}`,
+                padding: '12px 14px',
+              }}>
+                <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  Slot #{slot.slotNumber}
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '4px', color: isHired ? BRAND.orange : '#999', fontStyle: isHired ? 'normal' : 'italic' }}>
+                  {isHired ? (linkedAgent?.name || slot.hiredName || 'Hired') : `Candidate ${slot.slotNumber}`}
+                </div>
+                <div style={{ marginTop: '10px' }}>
+                  {!isHired ? (
+                    <button onClick={() => onConvertSlot(slot)}
+                      style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '6px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', width: '100%', justifyContent: 'center' }}>
+                      <UserPlus size={11} /> Convert
+                    </button>
+                  ) : (
+                    <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', padding: '4px' }}>
+                      <Check size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px', color: BRAND.orange }} />
+                      Hired
+                    </div>
+                  )}
+                </div>
               </div>
-              <div style={{ fontWeight: 700, fontSize: '13px', marginTop: '4px', color: slot.status === 'hired' ? BRAND.orange : '#999', fontStyle: slot.status === 'hired' ? 'normal' : 'italic' }}>
-                {slot.status === 'hired' ? (slot.hiredName || 'Hired') : `Candidate ${slot.slotNumber}`}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {(rec.candidates || []).length === 0 && (
             <div style={{ gridColumn: '1 / -1', padding: '20px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No slots</div>
           )}
@@ -1279,7 +1351,7 @@ function NewRecruitmentModal({ recruiters, trainers, onClose }) {
   const save = async () => {
     setError('');
     if (!form.name.trim()) { setError('Name is required'); return; }
-    if (!form.targetCount || form.targetCount < 1) { setError('Target count must be at least 1'); return; }
+    if (!form.targetCount || form.targetCount < 1) { setError('Target must be at least 1'); return; }
     setProcessing(true);
     try { await createRecruitment(form); onClose(); }
     catch (err) { setError(err.message); setProcessing(false); }
@@ -1329,7 +1401,7 @@ function NewRecruitmentModal({ recruiters, trainers, onClose }) {
                 </button>
               );
             })}
-            {availableRecruiters.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No recruiters for {form.market} — create them in Admin first</span>}
+            {availableRecruiters.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No recruiters for {form.market}</span>}
           </div>
         </div>
         <div>
@@ -1344,7 +1416,7 @@ function NewRecruitmentModal({ recruiters, trainers, onClose }) {
                 </button>
               );
             })}
-            {availableTrainers.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No trainers for {form.market} — create them in Admin first</span>}
+            {availableTrainers.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No trainers for {form.market}</span>}
           </div>
         </div>
       </div>
@@ -1352,14 +1424,13 @@ function NewRecruitmentModal({ recruiters, trainers, onClose }) {
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} disabled={processing} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
         <button onClick={save} disabled={processing} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
-          {processing ? 'Creating...' : 'Create recruitment'}
+          {processing ? 'Creating...' : 'Create'}
         </button>
       </div>
     </ModalShell>
   );
 }
 
-// ============ SKILL VIEWS ============
 function SkillListView({ skillStats, setSelectedSkill, isAdmin, onManageSkills }) {
   return (
     <div>
@@ -1469,7 +1540,6 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
   );
 }
 
-// ============ ADMIN ============
 function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams, onManageTrainers, onManageRecruiters }) {
   const [users, setUsers] = useState([]);
   const [showNew, setShowNew] = useState(false);
@@ -1697,7 +1767,6 @@ function NewAgentModal({ session, teams, trainers, onClose }) {
   );
 }
 
-// Manage modals reuse SimpleManageModal for simple cases
 function ManageSkillsModal({ skills, skillStats, onClose }) {
   return <SimpleManageModal title="Manage skills" items={skills}
     columns={[{ key: 'name', label: 'Name' }, { key: 'description', label: 'Description' }, { key: 'targetVolumePct', label: 'Target %', isNumber: true, width: '90px' }]}
