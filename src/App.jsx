@@ -5,7 +5,7 @@ import {
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
   Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
-  Megaphone,
+  Megaphone, MinusCircle, Unlink,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
@@ -18,6 +18,8 @@ import {
   createRecruiter, updateRecruiter, deleteRecruiter,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
+  addCandidateSlots, removeCandidateSlot,
+  revertCandidateSlotDeleteAgent, unlinkCandidateSlot,
   addTimelineEvent, deleteTimelineEvent, deleteUser,
   bulkDeleteAgents, bulkAssignTeam, bulkAssignTrainer,
 } from './lib/data.js';
@@ -245,7 +247,12 @@ function Dashboard({ session, onLogout }) {
             onToggleSkill={handleToggleSkill}
             onAddComment={() => setModal({ type: 'comment', agentId: selectedAgent })}
             onDeleteAgent={async () => {
-              if (confirm('Delete this agent and all history?')) {
+              const agent = agents.find(a => a.id === selectedAgent);
+              const linkedRec = agent?.recruitmentId ? recruitments.find(r => r.id === agent.recruitmentId) : null;
+              const msg = linkedRec
+                ? `Delete this agent and all history?\n\nThe slot in recruitment "${linkedRec.name}" will be freed up.`
+                : 'Delete this agent and all history?';
+              if (confirm(msg)) {
                 await deleteAgent(selectedAgent);
                 setSelectedAgent(null);
               }
@@ -270,7 +277,10 @@ function Dashboard({ session, onLogout }) {
           <RecruitmentDetailView recruitmentId={selectedRecruitment} recruitments={recruitments}
             trainers={trainers} recruiters={recruiters} agents={agents} session={session}
             onBack={() => setSelectedRecruitment(null)}
-            onConvertSlot={(slot) => setModal({ type: 'convertCandidate', slot, recruitmentId: selectedRecruitment })} />
+            onConvertSlot={(slot) => setModal({ type: 'convertCandidate', slot, recruitmentId: selectedRecruitment })}
+            onAddSlots={() => setModal({ type: 'addSlots', recruitmentId: selectedRecruitment })}
+            onRemoveSlot={(slot) => setModal({ type: 'removeSlot', slot, recruitmentId: selectedRecruitment })}
+            onRevertSlot={(slot) => setModal({ type: 'revertSlot', slot, recruitmentId: selectedRecruitment })} />
         )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters}
@@ -292,9 +302,22 @@ function Dashboard({ session, onLogout }) {
           recruitments={recruitments} recruiters={recruiters} session={session}
           onClose={() => setModal(null)} />
       )}
+      {modal?.type === 'addSlots' && (
+        <AddSlotsModal recruitmentId={modal.recruitmentId} recruitments={recruitments}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'removeSlot' && (
+        <RemoveSlotModal slot={modal.slot} recruitmentId={modal.recruitmentId}
+          recruitments={recruitments} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'revertSlot' && (
+        <RevertSlotModal slot={modal.slot} recruitmentId={modal.recruitmentId}
+          recruitments={recruitments} agents={agents} session={session}
+          onClose={() => setModal(null)} />
+      )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.5 · Learning Operations</span>
+        <span>POWER · Control Tower v1.6 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -361,6 +384,183 @@ function ConvertCandidateModal({ slot, recruitmentId, recruitments, recruiters, 
           style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || !name.trim()) ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: !name.trim() ? 0.5 : 1 }}>
           {processing ? 'Creating...' : 'Create agent'}
         </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ============ ROUND 3b-1 MODALS ============
+
+function AddSlotsModal({ recruitmentId, recruitments, onClose }) {
+  const [count, setCount] = useState(1);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const rec = recruitments.find(r => r.id === recruitmentId);
+
+  if (!rec) return null;
+
+  const save = async () => {
+    const n = parseInt(count);
+    if (!n || n < 1) { setError('Enter a positive number'); return; }
+    if (n > 100) { setError('Max 100 slots at a time'); return; }
+    setError(''); setProcessing(true);
+    try {
+      await addCandidateSlots(recruitmentId, n);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to add slots');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Add candidate slots</h3>
+      <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
+        Add empty slots to <strong style={{ color: BRAND.orange }}>{rec.name}</strong>. New slots will be numbered after the existing ones.
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Number of slots to add *</FormLabel>
+        <input autoFocus type="number" min="1" max="100" value={count}
+          onChange={(e) => setCount(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+          style={{ width: '100%', padding: '10px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', fontSize: '14px' }} />
+      </div>
+
+      <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid ${BRAND.orange}`, fontSize: '11px', color: '#bbb', lineHeight: 1.6 }}>
+        Currently: <strong>{rec.candidates?.length || 0}</strong> slots
+        {rec.status === 'Completed' && <><br />⚠ Status will reset from <strong>Completed</strong> to <strong>Live</strong>.</>}
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Adding...' : 'Add slots'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function RemoveSlotModal({ slot, recruitmentId, recruitments, onClose }) {
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const rec = recruitments.find(r => r.id === recruitmentId);
+
+  if (!rec || !slot) return null;
+
+  const remove = async () => {
+    setError(''); setProcessing(true);
+    try {
+      await removeCandidateSlot(recruitmentId, slot.slotNumber);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to remove slot');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Remove slot</h3>
+      <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
+        Remove <strong style={{ color: BRAND.orange }}>Slot #{slot.slotNumber}</strong> from "{rec.name}"?
+      </div>
+
+      <div style={{ marginTop: '16px', padding: '12px', background: BRAND.black, borderLeft: `3px solid #555`, fontSize: '11px', color: '#bbb', lineHeight: 1.6 }}>
+        This permanently removes the empty slot. The recruitment's target count will go from <strong>{rec.candidates?.length || 0}</strong> to <strong>{(rec.candidates?.length || 0) - 1}</strong>.
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={remove} disabled={processing}
+          style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Removing...' : 'Remove slot'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function RevertSlotModal({ slot, recruitmentId, recruitments, agents, session, onClose }) {
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+  const rec = recruitments.find(r => r.id === recruitmentId);
+  const linkedAgent = slot?.agentId ? agents.find(a => a.id === slot.agentId) : null;
+
+  if (!rec || !slot) return null;
+
+  const agentDisplayName = linkedAgent?.name || slot.hiredName || 'Unknown agent';
+
+  const doUnlink = async () => {
+    setError(''); setProcessing(true);
+    try {
+      await unlinkCandidateSlot(recruitmentId, slot.slotNumber, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to unlink');
+      setProcessing(false);
+    }
+  };
+
+  const doDelete = async () => {
+    if (!confirm(`Delete agent "${agentDisplayName}" and all their history?\n\nThis cannot be undone.`)) return;
+    setError(''); setProcessing(true);
+    try {
+      await revertCandidateSlotDeleteAgent(recruitmentId, slot.slotNumber, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to delete');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Manage hired slot</h3>
+      <div style={{ marginTop: '12px', color: '#bbb', fontSize: '13px' }}>
+        <strong style={{ color: BRAND.orange }}>Slot #{slot.slotNumber}</strong> in "{rec.name}" is hired by{' '}
+        <strong style={{ color: BRAND.white }}>{agentDisplayName}</strong>.
+        {!linkedAgent && <span style={{ color: BRAND.yellow }}> (Agent profile not found — may already be deleted.)</span>}
+      </div>
+
+      <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+        <div style={{ background: BRAND.black, border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, padding: '14px' }}>
+          <div className="display-font" style={{ fontSize: '14px', color: BRAND.yellow }}>Unlink only</div>
+          <div style={{ fontSize: '11px', color: '#bbb', marginTop: '6px', lineHeight: 1.5 }}>
+            Free the slot but <strong>keep the agent</strong>. The agent stays in the system; their link to this recruitment is removed.
+          </div>
+          <button onClick={doUnlink} disabled={processing || !linkedAgent}
+            style={{ background: BRAND.yellow, color: BRAND.black, border: 'none', padding: '8px 12px', cursor: (processing || !linkedAgent) ? 'not-allowed' : 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginTop: '12px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', opacity: !linkedAgent ? 0.5 : 1 }}>
+            <Unlink size={12} /> Unlink
+          </button>
+        </div>
+
+        <div style={{ background: BRAND.black, border: `1px solid #333`, borderLeft: `3px solid ${BRAND.red}`, padding: '14px' }}>
+          <div className="display-font" style={{ fontSize: '14px', color: BRAND.red }}>Delete agent</div>
+          <div style={{ fontSize: '11px', color: '#bbb', marginTop: '6px', lineHeight: 1.5 }}>
+            Free the slot <strong>and delete the agent</strong> with all history. Use this if the hire was a mistake.
+          </div>
+          <button onClick={doDelete} disabled={processing}
+            style={{ background: BRAND.red, color: BRAND.white, border: 'none', padding: '8px 12px', cursor: processing ? 'wait' : 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginTop: '12px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+            <Trash2 size={12} /> Delete agent
+          </button>
+        </div>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
       </div>
     </ModalShell>
   );
@@ -1079,7 +1279,7 @@ function RecruitmentListView({ recruitments, trainers, recruiters, setSelectedRe
 }
 
 // ============ RECRUITMENT DETAIL — UPDATED with Convert button ============
-function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, agents, session, onBack, onConvertSlot }) {
+function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruiters, agents, session, onBack, onConvertSlot, onAddSlots, onRemoveSlot, onRevertSlot }) {
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState(null);
   const [error, setError] = useState('');
@@ -1286,9 +1486,15 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
 
       {/* Candidate slots — UPDATED with Convert button */}
       <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333` }}>
-        <h3 className="display-font" style={{ margin: '0 0 16px', fontSize: '20px' }}>
-          Candidate slots ({rec.candidates?.length || 0})
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+          <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>
+            Candidate slots ({rec.candidates?.length || 0})
+          </h3>
+          <button onClick={onAddSlots}
+            style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Plus size={12} /> Add slots
+          </button>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
           {(rec.candidates || []).map(slot => {
             const linkedAgent = slot.agentId ? agents.find(a => a.id === slot.agentId) : null;
@@ -1299,7 +1505,17 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
                 border: `1px solid ${isHired ? BRAND.orange : '#333'}`,
                 borderLeft: `3px solid ${isHired ? BRAND.orange : '#555'}`,
                 padding: '12px 14px',
+                position: 'relative',
               }}>
+                {!isHired && (
+                  <button onClick={() => onRemoveSlot(slot)}
+                    title="Remove this empty slot"
+                    style={{ position: 'absolute', top: '6px', right: '6px', background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                    onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                    <X size={14} />
+                  </button>
+                )}
                 <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                   Slot #{slot.slotNumber}
                 </div>
@@ -1313,10 +1529,10 @@ function RecruitmentDetailView({ recruitmentId, recruitments, trainers, recruite
                       <UserPlus size={11} /> Convert
                     </button>
                   ) : (
-                    <div style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center', padding: '4px' }}>
-                      <Check size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px', color: BRAND.orange }} />
-                      Hired
-                    </div>
+                    <button onClick={() => onRevertSlot(slot)}
+                      style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '6px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', width: '100%', justifyContent: 'center' }}>
+                      <Check size={11} /> Hired · Manage
+                    </button>
                   )}
                 </div>
               </div>
