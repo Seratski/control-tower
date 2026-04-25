@@ -16,6 +16,7 @@ import {
   createTeam, updateTeam, deleteTeam,
   createTrainer, updateTrainer, deleteTrainer,
   createRecruiter, updateRecruiter, deleteRecruiter,
+  subscribeCourseTypes, createCourseType, updateCourseType, deleteCourseType,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -129,6 +130,7 @@ function Dashboard({ session, onLogout }) {
   const [trainers, setTrainers] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
+  const [courseTypes, setCourseTypes] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
@@ -144,8 +146,9 @@ function Dashboard({ session, onLogout }) {
     const unsubTrainers = subscribeTrainers(setTrainers);
     const unsubRecruiters = subscribeRecruiters(setRecruiters);
     const unsubRecruitments = subscribeRecruitments(setRecruitments);
+    const unsubCourseTypes = subscribeCourseTypes(setCourseTypes);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); };
+    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -290,10 +293,11 @@ function Dashboard({ session, onLogout }) {
             onRevertSlot={(slot) => setModal({ type: 'revertSlot', slot, recruitmentId: selectedRecruitment })} />
         )}
         {view === 'admin' && isAdmin && (
-          <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters}
+          <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters} courseTypes={courseTypes}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
             onManageTrainers={() => setModal({ type: 'manageTrainers' })}
-            onManageRecruiters={() => setModal({ type: 'manageRecruiters' })} />
+            onManageRecruiters={() => setModal({ type: 'manageRecruiters' })}
+            onManageCourseTypes={() => setModal({ type: 'manageCourseTypes' })} />
         )}
       </main>
 
@@ -303,6 +307,7 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'manageTeams' && <ManageTeamsModal teams={teams} agents={agents} onClose={() => setModal(null)} />}
       {modal?.type === 'manageTrainers' && <ManageTrainersModal trainers={trainers} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'manageRecruiters' && <ManageRecruitersModal recruiters={recruiters} onClose={() => setModal(null)} />}
+      {modal?.type === 'manageCourseTypes' && <ManageCourseTypesModal courseTypes={courseTypes} skills={skills} onClose={() => setModal(null)} />}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -324,7 +329,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v1.7 · Learning Operations</span>
+        <span>POWER · Control Tower v1.8 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -1793,7 +1798,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
   );
 }
 
-function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams, onManageTrainers, onManageRecruiters }) {
+function AdminView({ session, skills, teams, trainers, recruiters, courseTypes, onManageTeams, onManageTrainers, onManageRecruiters, onManageCourseTypes }) {
   const [users, setUsers] = useState([]);
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ username: '', displayName: '', pin: '', role: 'reader' });
@@ -1830,6 +1835,7 @@ function AdminView({ session, skills, teams, trainers, recruiters, onManageTeams
         <AdminActionCard icon={Users2} title="Teams" count={teams.length} label="teams defined" onClick={onManageTeams} />
         <AdminActionCard icon={Briefcase} title="Trainers" count={trainers.length} label="trainers" onClick={onManageTrainers} />
         <AdminActionCard icon={UserCog} title="Recruiters" count={recruiters.length} label="recruiters" onClick={onManageRecruiters} />
+        <AdminActionCard icon={GraduationCap} title="Course Types" count={(courseTypes || []).length} label="course types" onClick={onManageCourseTypes} />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
@@ -2047,6 +2053,160 @@ function ManageRecruitersModal({ recruiters, onClose }) {
     columns={[{ key: 'name', label: 'Name' }, { key: 'market', label: 'Market', isSelect: true, options: ['DK', 'NO', 'SE', 'FI'], width: '120px' }]}
     defaults={{ name: '', market: 'DK' }}
     onCreate={createRecruiter} onUpdate={updateRecruiter} onDelete={deleteRecruiter} onClose={onClose} />;
+}
+
+function ManageCourseTypesModal({ courseTypes, skills, onClose }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState({ name: '', description: '', defaultSkillIds: [] });
+  const [error, setError] = useState('');
+
+  const startEdit = (ct) => {
+    setEditingId(ct.id);
+    setEditForm({ name: ct.name, description: ct.description || '', defaultSkillIds: ct.defaultSkillIds || [] });
+  };
+  const saveEdit = async () => {
+    if (!editForm.name.trim()) { setError('Name required'); return; }
+    try { await updateCourseType(editingId, editForm); setEditingId(null); setError(''); }
+    catch (err) { setError(err.message); }
+  };
+  const handleDelete = async (ct) => {
+    if (confirm(`Delete course type "${ct.name}"?\n\nThis will not affect existing courses already created from this type.`)) {
+      await deleteCourseType(ct.id);
+    }
+  };
+  const handleCreate = async (e) => {
+    e.preventDefault(); setError('');
+    if (!newForm.name.trim()) { setError('Name required'); return; }
+    try {
+      await createCourseType(newForm);
+      setNewForm({ name: '', description: '', defaultSkillIds: [] });
+      setShowNew(false);
+    } catch (err) { setError(err.message); }
+  };
+  const toggleSkill = (formState, setFormState, skillId) => {
+    const has = (formState.defaultSkillIds || []).includes(skillId);
+    setFormState({
+      ...formState,
+      defaultSkillIds: has
+        ? formState.defaultSkillIds.filter(s => s !== skillId)
+        : [...(formState.defaultSkillIds || []), skillId],
+    });
+  };
+
+  return (
+    <ModalShell onClose={onClose} wide>
+      <h3 className="display-font" style={{ margin: '0 0 8px', fontSize: '24px' }}>Manage course types</h3>
+      <div style={{ fontSize: '12px', color: '#bbb', marginBottom: '16px', lineHeight: 1.5 }}>
+        Course types are templates for the courses you'll run (e.g. <em>Onboarding</em>, <em>Leadership training</em>).
+        Default skills are automatically assigned to enrolled agents when a course of this type is completed.
+      </div>
+
+      {!showNew && (
+        <button onClick={() => setShowNew(true)} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' }}>
+          <Plus size={14} /> New course type
+        </button>
+      )}
+      {showNew && (
+        <form onSubmit={handleCreate} style={{ background: BRAND.black, padding: '20px', border: `1px solid ${BRAND.orange}`, marginBottom: '20px' }}>
+          <div style={{ marginBottom: '12px' }}>
+            <FormField label="Name *" required value={newForm.name} onChange={(v) => setNewForm({ ...newForm, name: v })} placeholder="Onboarding, Leadership training, etc." />
+          </div>
+          <div style={{ marginBottom: '12px' }}>
+            <FormLabel>Description</FormLabel>
+            <textarea value={newForm.description} onChange={(e) => setNewForm({ ...newForm, description: e.target.value })}
+              placeholder="What is this type of course about?" rows={2}
+              style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+          </div>
+          <FormLabel>Default skills (assigned on completion)</FormLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px', background: BRAND.grey, border: `1px solid #444`, marginBottom: '12px' }}>
+            {skills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>No skills defined yet</span>}
+            {skills.map(s => {
+              const isChecked = (newForm.defaultSkillIds || []).includes(s.id);
+              return (
+                <button key={s.id} type="button" onClick={() => toggleSkill(newForm, setNewForm, s.id)}
+                  style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}>{s.name}</button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="submit" style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Create</button>
+            <button type="button" onClick={() => { setShowNew(false); setNewForm({ name: '', description: '', defaultSkillIds: [] }); setError(''); }}
+              style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '8px 16px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
+
+      <div style={{ background: BRAND.black, border: `1px solid #333` }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ background: '#1a1a1a' }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Description</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '10px', color: '#999', textTransform: 'uppercase' }}>Default skills</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '10px', color: '#999' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {courseTypes.map(ct => {
+              const isEditing = editingId === ct.id;
+              const defaultSkills = skills.filter(s => (ct.defaultSkillIds || []).includes(s.id));
+              if (isEditing) return (
+                <tr key={ct.id} style={{ borderTop: `1px solid #333`, background: BRAND.grey }}>
+                  <td style={{ padding: '8px 12px', verticalAlign: 'top' }}>
+                    <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit' }} />
+                  </td>
+                  <td style={{ padding: '8px 12px', verticalAlign: 'top' }}>
+                    <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                      rows={2}
+                      style={{ width: '100%', padding: '4px 6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px', resize: 'vertical' }} />
+                  </td>
+                  <td style={{ padding: '8px 12px', verticalAlign: 'top' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {skills.map(s => {
+                        const isChecked = (editForm.defaultSkillIds || []).includes(s.id);
+                        return <button key={s.id} type="button" onClick={() => toggleSkill(editForm, setEditForm, s.id)}
+                          style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '3px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>{s.name}</button>;
+                      })}
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                    <button onClick={saveEdit} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Save</button>
+                    <button onClick={() => { setEditingId(null); setError(''); }} style={{ background: 'transparent', border: `1px solid #555`, color: BRAND.white, padding: '4px 10px', cursor: 'pointer', fontSize: '10px' }}>Cancel</button>
+                  </td>
+                </tr>
+              );
+              return (
+                <tr key={ct.id} style={{ borderTop: `1px solid #333` }}>
+                  <td style={{ padding: '10px 12px', fontWeight: 700, verticalAlign: 'top' }}>{ct.name}</td>
+                  <td style={{ padding: '10px 12px', color: ct.description ? '#bbb' : '#666', fontSize: '12px', verticalAlign: 'top', fontStyle: ct.description ? 'normal' : 'italic' }}>
+                    {ct.description || 'No description'}
+                  </td>
+                  <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                      {defaultSkills.map(s => <span key={s.id} style={{ fontSize: '10px', padding: '2px 6px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700 }}>{s.name}</span>)}
+                      {defaultSkills.length === 0 && <span style={{ color: '#666', fontSize: '11px', fontStyle: 'italic' }}>None</span>}
+                    </div>
+                  </td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => startEdit(ct)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Edit</button>
+                    <button onClick={() => handleDelete(ct)} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>Delete</button>
+                  </td>
+                </tr>
+              );
+            })}
+            {courseTypes.length === 0 && <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic' }}>No course types yet — create one to get started</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Done</button>
+      </div>
+    </ModalShell>
+  );
 }
 
 function ManageTrainersModal({ trainers, skills, onClose }) {
