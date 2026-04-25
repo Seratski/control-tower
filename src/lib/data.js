@@ -105,7 +105,7 @@ export async function updateRecruiter(recruiterId, updates) {
 }
 export async function deleteRecruiter(recruiterId) { await deleteDoc(doc(db, 'recruiters', recruiterId)); }
 
-// ============ RECRUITMENTS (NEW) ============
+// ============ RECRUITMENTS ============
 export function subscribeRecruitments(callback) {
   const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
@@ -115,7 +115,6 @@ export async function createRecruitment({ name, market, targetCount, application
   const cleanId = 'rec_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
 
-  // Auto-generate candidate slots
   const candidates = [];
   const target = parseInt(targetCount) || 0;
   for (let i = 1; i <= target; i++) {
@@ -150,8 +149,78 @@ export async function updateRecruitment(recruitmentId, updates) {
 }
 
 export async function deleteRecruitment(recruitmentId) {
-  // Does NOT delete linked agents — just removes the recruitment
   await deleteDoc(doc(db, 'recruitments', recruitmentId));
+}
+
+/**
+ * NEW IN ROUND 3a: Convert candidate slot → real agent
+ * - Creates new agent with status='Onboarding', recruitmentId set
+ * - Logs timeline events: profile created + hired via [recruitment]
+ * - Updates the slot with hired status + agentId
+ * - Auto-completes recruitment if all slots are hired
+ */
+export async function convertCandidateToAgent(recruitmentId, slotNumber, agentName, recruiters, actorName) {
+  const recRef = doc(db, 'recruitments', recruitmentId);
+  const recSnap = await getDoc(recRef);
+  if (!recSnap.exists()) throw new Error('Recruitment not found');
+  const rec = recSnap.data();
+
+  // Build recruiter names list for the timeline event
+  const recruiterNames = (rec.recruiterIds || [])
+    .map(id => recruiters.find(r => r.id === id)?.name)
+    .filter(Boolean);
+
+  // Create the new agent
+  const newAgent = {
+    name: agentName.trim(),
+    market: rec.market,
+    startDate: rec.classStartDate || new Date().toISOString().split('T')[0],
+    status: 'Onboarding',
+    skills: [],
+    teamId: null,
+    trainerId: null,
+    recruitmentId,
+    onboardingComplete: false,
+    createdAt: serverTimestamp(),
+  };
+  const agentRef = await addDoc(collection(db, 'agents'), newAgent);
+
+  // Timeline event 1: profile created
+  await addTimelineEvent(agentRef.id, {
+    type: 'onboarding',
+    title: 'Agent profile created',
+    note: '',
+    createdBy: actorName,
+  });
+
+  // Timeline event 2: hired via recruitment
+  const recruitersNote = recruiterNames.length > 0
+    ? `Recruited by: ${recruiterNames.join(', ')}`
+    : 'Recruited (no recruiter specified)';
+  await addTimelineEvent(agentRef.id, {
+    type: 'onboarding',
+    title: `Hired via "${rec.name}"`,
+    note: recruitersNote,
+    createdBy: actorName,
+  });
+
+  // Update the slot in the recruitment
+  const updatedCandidates = (rec.candidates || []).map(c =>
+    c.slotNumber === slotNumber
+      ? { ...c, status: 'hired', agentId: agentRef.id, hiredName: agentName.trim() }
+      : c
+  );
+
+  // Auto-complete recruitment if all slots are now hired
+  const allHired = updatedCandidates.length > 0 && updatedCandidates.every(c => c.status === 'hired');
+  const newStatus = allHired ? 'Completed' : rec.status;
+
+  await updateDoc(recRef, {
+    candidates: updatedCandidates,
+    status: newStatus,
+  });
+
+  return agentRef.id;
 }
 
 // ============ AGENTS ============
@@ -175,6 +244,7 @@ export async function createAgent({ name, market, startDate, status, teamId, tra
     skills: [],
     teamId: teamId || null,
     trainerId: trainerId || null,
+    recruitmentId: null,
     onboardingComplete: status === 'Active',
     createdAt: serverTimestamp(),
   };
