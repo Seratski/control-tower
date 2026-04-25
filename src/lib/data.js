@@ -167,6 +167,99 @@ export async function updateCourse(courseId, updates) {
 }
 export async function deleteCourse(courseId) { await deleteDoc(doc(db, 'courses', courseId)); }
 
+/**
+ * NEW IN C3: Enroll one or more agents on a course (idempotent — won't duplicate)
+ */
+export async function enrollAgentsOnCourse(courseId, agentIds, courseName, actorName) {
+  if (!Array.isArray(agentIds) || agentIds.length === 0) return;
+  const courseRef = doc(db, 'courses', courseId);
+  const snap = await getDoc(courseRef);
+  if (!snap.exists()) throw new Error('Course not found');
+  const current = snap.data().enrolledAgentIds || [];
+  const additions = agentIds.filter(id => !current.includes(id));
+  if (additions.length === 0) return;
+  await updateDoc(courseRef, { enrolledAgentIds: [...current, ...additions] });
+  for (const agentId of additions) {
+    await addTimelineEvent(agentId, {
+      type: 'training',
+      title: `Enrolled in course: ${courseName}`,
+      note: '',
+      createdBy: actorName,
+    });
+  }
+}
+
+/**
+ * NEW IN C3: Remove an agent from a course
+ */
+export async function unenrollAgentFromCourse(courseId, agentId, courseName, actorName) {
+  const courseRef = doc(db, 'courses', courseId);
+  const snap = await getDoc(courseRef);
+  if (!snap.exists()) throw new Error('Course not found');
+  const current = snap.data().enrolledAgentIds || [];
+  if (!current.includes(agentId)) return;
+  await updateDoc(courseRef, { enrolledAgentIds: current.filter(id => id !== agentId) });
+  await addTimelineEvent(agentId, {
+    type: 'training',
+    title: `Unenrolled from course: ${courseName}`,
+    note: '',
+    createdBy: actorName,
+  });
+}
+
+/**
+ * NEW IN C3: Change a course's status. When moving TO 'Completed', auto-assign
+ * the course's skillIds to all enrolled agents (idempotent — agents who already
+ * have the skill aren't re-added, and we don't duplicate timeline events).
+ * Reverting away from Completed does NOT remove skills (deliberate per design).
+ */
+export async function setCourseStatus(courseId, newStatus, actorName) {
+  const courseRef = doc(db, 'courses', courseId);
+  const snap = await getDoc(courseRef);
+  if (!snap.exists()) throw new Error('Course not found');
+  const course = snap.data();
+  const oldStatus = course.status;
+  if (oldStatus === newStatus) return;
+
+  await updateDoc(courseRef, { status: newStatus });
+
+  // Only fire side-effects when transitioning INTO Completed
+  if (newStatus === 'Completed' && oldStatus !== 'Completed') {
+    const skillIds = course.skillIds || [];
+    const agentIds = course.enrolledAgentIds || [];
+
+    // Look up skill names once for cleaner timeline notes
+    const skillNamesById = {};
+    for (const sid of skillIds) {
+      const skillSnap = await getDoc(doc(db, 'skills', sid));
+      if (skillSnap.exists()) skillNamesById[sid] = skillSnap.data().name;
+    }
+
+    for (const agentId of agentIds) {
+      // Re-fetch each agent so we know their current skills
+      const agentSnap = await getDoc(doc(db, 'agents', agentId));
+      if (!agentSnap.exists()) continue;
+      const existingSkills = agentSnap.data().skills || [];
+      const newSkillsForThisAgent = skillIds.filter(s => !existingSkills.includes(s));
+      if (newSkillsForThisAgent.length > 0) {
+        await updateDoc(doc(db, 'agents', agentId), {
+          skills: [...existingSkills, ...newSkillsForThisAgent],
+        });
+      }
+      // One timeline event per agent summarising the completion
+      const newSkillNames = newSkillsForThisAgent.map(s => skillNamesById[s] || s);
+      await addTimelineEvent(agentId, {
+        type: 'training',
+        title: `Completed course: ${course.name}`,
+        note: newSkillNames.length > 0
+          ? `Awarded skills: ${newSkillNames.join(', ')}`
+          : 'No new skills awarded (already certified).',
+        createdBy: actorName,
+      });
+    }
+  }
+}
+
 // ============ RECRUITMENTS ============
 export function subscribeRecruitments(callback) {
   const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
