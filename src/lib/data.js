@@ -260,6 +260,125 @@ export async function setCourseStatus(courseId, newStatus, actorName) {
   }
 }
 
+// ============ UPSKILLS (C4) ============
+export function subscribeUpskills(callback) {
+  const q = query(collection(db, 'upskills'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+export async function createUpskill({ name, skillId, trainerId, agentIds, market, startDate, deadline }) {
+  if (!skillId) throw new Error('Skill is required for an upskill task');
+  const cleanName = (name || '').trim();
+  const cleanId = 'up_' + (cleanName || skillId).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const finalId = cleanId + '_' + Date.now().toString().slice(-4);
+  await setDoc(doc(db, 'upskills', finalId), {
+    name: cleanName,
+    skillId,
+    trainerId: trainerId || null,
+    agentIds: agentIds || [],
+    market,
+    startDate: startDate || null,
+    deadline: deadline || null,
+    status: 'Planned',
+    createdAt: serverTimestamp(),
+  });
+  return finalId;
+}
+
+export async function updateUpskill(upskillId, updates) {
+  const cleanUpdates = {};
+  if (updates.name !== undefined) cleanUpdates.name = (updates.name || '').trim();
+  if (updates.skillId !== undefined) cleanUpdates.skillId = updates.skillId;
+  if (updates.trainerId !== undefined) cleanUpdates.trainerId = updates.trainerId || null;
+  if (updates.agentIds !== undefined) cleanUpdates.agentIds = updates.agentIds;
+  if (updates.startDate !== undefined) cleanUpdates.startDate = updates.startDate || null;
+  if (updates.deadline !== undefined) cleanUpdates.deadline = updates.deadline || null;
+  if (updates.status !== undefined) cleanUpdates.status = updates.status;
+  await updateDoc(doc(db, 'upskills', upskillId), cleanUpdates);
+}
+
+export async function deleteUpskill(upskillId) { await deleteDoc(doc(db, 'upskills', upskillId)); }
+
+export async function addAgentsToUpskill(upskillId, newAgentIds, upskillLabel, actorName) {
+  if (!Array.isArray(newAgentIds) || newAgentIds.length === 0) return;
+  const ref = doc(db, 'upskills', upskillId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Upskill not found');
+  const current = snap.data().agentIds || [];
+  const additions = newAgentIds.filter(id => !current.includes(id));
+  if (additions.length === 0) return;
+  await updateDoc(ref, { agentIds: [...current, ...additions] });
+  for (const agentId of additions) {
+    await addTimelineEvent(agentId, {
+      type: 'training',
+      title: `Assigned upskill: ${upskillLabel}`,
+      note: '',
+      createdBy: actorName,
+    });
+  }
+}
+
+export async function removeAgentFromUpskill(upskillId, agentId, upskillLabel, actorName) {
+  const ref = doc(db, 'upskills', upskillId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Upskill not found');
+  const current = snap.data().agentIds || [];
+  if (!current.includes(agentId)) return;
+  await updateDoc(ref, { agentIds: current.filter(id => id !== agentId) });
+  await addTimelineEvent(agentId, {
+    type: 'training',
+    title: `Removed from upskill: ${upskillLabel}`,
+    note: '',
+    createdBy: actorName,
+  });
+}
+
+/**
+ * Change an upskill's status. When transitioning TO Completed, auto-assign
+ * the upskill's skill to all agents (idempotent — agents who already have it
+ * aren't re-added, no duplicate timeline event lines).
+ * Reverting away from Completed does NOT remove skills (consistent with courses).
+ */
+export async function setUpskillStatus(upskillId, newStatus, actorName) {
+  const ref = doc(db, 'upskills', upskillId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Upskill not found');
+  const upskill = snap.data();
+  const oldStatus = upskill.status;
+  if (oldStatus === newStatus) return;
+
+  await updateDoc(ref, { status: newStatus });
+
+  if (newStatus === 'Completed' && oldStatus !== 'Completed') {
+    const skillId = upskill.skillId;
+    if (!skillId) return;
+    const skillSnap = await getDoc(doc(db, 'skills', skillId));
+    const skillName = skillSnap.exists() ? skillSnap.data().name : skillId;
+
+    const agentIds = upskill.agentIds || [];
+    for (const agentId of agentIds) {
+      const agentSnap = await getDoc(doc(db, 'agents', agentId));
+      if (!agentSnap.exists()) continue;
+      const existingSkills = agentSnap.data().skills || [];
+      const alreadyHas = existingSkills.includes(skillId);
+      if (!alreadyHas) {
+        await updateDoc(doc(db, 'agents', agentId), {
+          skills: [...existingSkills, skillId],
+        });
+      }
+      const upskillLabel = upskill.name || skillName;
+      await addTimelineEvent(agentId, {
+        type: 'training',
+        title: `Completed upskill: ${upskillLabel}`,
+        note: alreadyHas
+          ? `Already had ${skillName} — no new skill awarded.`
+          : `Awarded skill: ${skillName}`,
+        createdBy: actorName,
+      });
+    }
+  }
+}
+
 // ============ RECRUITMENTS ============
 export function subscribeRecruitments(callback) {
   const q = query(collection(db, 'recruitments'), orderBy('createdAt', 'desc'));
