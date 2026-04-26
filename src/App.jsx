@@ -465,7 +465,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v2.3 · Learning Operations</span>
+        <span>POWER · Control Tower v3.0 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -717,6 +717,35 @@ function RevertSlotModal({ slot, recruitmentId, recruitments, agents, session, o
 // ============ CONTROL TOWER VIEW (C6) ============
 // Trainer-axis overview: who is teaching what, now and upcoming.
 
+/**
+ * Subscribes to timeLogs subcollections for a list of (parentType, parentId) pairs
+ * and returns a map of "type:id" -> total hours. Designed for ControlTowerView
+ * where we need aggregated per-trainer hours across many active tasks.
+ */
+function useAggregatedTimeLogs(taskRefs) {
+  const [hoursByTask, setHoursByTask] = useState({});
+
+  // Stable key for the effect: which tasks are we subscribing to?
+  const refsKey = taskRefs.map(r => `${r.type}:${r.id}`).sort().join('|');
+
+  useEffect(() => {
+    // Reset before re-subscribing so old totals don't linger
+    setHoursByTask({});
+    if (taskRefs.length === 0) return;
+
+    const unsubs = taskRefs.map(({ type, id }) => {
+      return subscribeTimeLogs(type, id, (logs) => {
+        const total = logs.reduce((sum, l) => sum + (l.hours || 0), 0);
+        setHoursByTask(prev => ({ ...prev, [`${type}:${id}`]: total }));
+      });
+    });
+    return () => unsubs.forEach(fn => fn && fn());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refsKey]);
+
+  return hoursByTask;
+}
+
 function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpToCourse, onJumpToUpskill }) {
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ACTIVE'); // default to "active": Planned + In progress
@@ -780,6 +809,37 @@ function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpT
 
   const totalTasks = filteredCourses.length + filteredUpskills.length;
 
+  // C7: aggregate time logs across all currently filtered tasks
+  const taskRefs = useMemo(() => {
+    return [
+      ...filteredCourses.map(c => ({ type: 'course', id: c.id })),
+      ...filteredUpskills.map(u => ({ type: 'upskill', id: u.id })),
+    ];
+  }, [filteredCourses, filteredUpskills]);
+  const hoursByTask = useAggregatedTimeLogs(taskRefs);
+
+  // Total hours per trainer (sum of hours on all their currently-filtered tasks)
+  const hoursPerTrainer = useMemo(() => {
+    const map = {};
+    for (const c of filteredCourses) {
+      if (c.trainerId) map[c.trainerId] = (map[c.trainerId] || 0) + (hoursByTask[`course:${c.id}`] || 0);
+    }
+    for (const u of filteredUpskills) {
+      if (u.trainerId) map[u.trainerId] = (map[u.trainerId] || 0) + (hoursByTask[`upskill:${u.id}`] || 0);
+    }
+    return map;
+  }, [filteredCourses, filteredUpskills, hoursByTask]);
+
+  const totalHoursLogged = Object.values(hoursByTask).reduce((sum, h) => sum + h, 0);
+
+  // Tasks-per-market for the donut chart (counts, not hours)
+  const tasksByMarket = useMemo(() => {
+    const map = { DK: 0, NO: 0, SE: 0, FI: 0 };
+    for (const c of filteredCourses) if (map[c.market] !== undefined) map[c.market]++;
+    for (const u of filteredUpskills) if (map[u.market] !== undefined) map[u.market]++;
+    return map;
+  }, [filteredCourses, filteredUpskills]);
+
   return (
     <div>
       <div style={{ marginBottom: '24px' }}>
@@ -787,11 +847,24 @@ function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpT
           Control Tower · {totalTasks} {totalTasks === 1 ? 'task' : 'tasks'}
         </div>
         <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
-          Training <span style={{ color: BRAND.orange }}>overview</span>
+          <span style={{ color: BRAND.orange }}>Learning Unit</span> · Nordic Customer Service
         </h2>
         <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
           What each trainer is currently working on. Click a card to jump to its detail view.
         </div>
+      </div>
+
+      {/* KPI strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <CTKPICard label="Trainers" value={trainers.filter(t => marketFilter === 'ALL' || t.market === marketFilter).length} icon={Briefcase} />
+        <CTKPICard label="Active tasks" value={totalTasks} icon={Activity} />
+        <CTKPICard label="Hours logged" value={`${totalHoursLogged.toFixed(1)}h`} icon={Clock} />
+      </div>
+
+      {/* Charts row: bar chart + donut */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: '14px', marginBottom: '24px' }}>
+        <CTHoursPerTrainerChart trainers={trainers} hoursPerTrainer={hoursPerTrainer} marketFilter={marketFilter} />
+        <CTMarketDonut tasksByMarket={tasksByMarket} />
       </div>
 
       <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '24px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -849,8 +922,17 @@ function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpT
                       <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{trainer.market}</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: '11px', color: isIdle ? '#666' : BRAND.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    {isIdle ? 'No active tasks' : `${data.courses.length} course${data.courses.length === 1 ? '' : 's'} · ${data.upskills.length} upskill${data.upskills.length === 1 ? '' : 's'}`}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {!isIdle && (hoursPerTrainer[trainer.id] || 0) > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', fontWeight: 700 }}>
+                        <Clock size={12} color={BRAND.orange} />
+                        <span style={{ color: BRAND.orange }}>{(hoursPerTrainer[trainer.id] || 0).toFixed(1)}h</span>
+                        <span style={{ color: '#666', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', marginLeft: '2px' }}>logged</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: '11px', color: isIdle ? '#666' : BRAND.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      {isIdle ? 'No active tasks' : `${data.courses.length} course${data.courses.length === 1 ? '' : 's'} · ${data.upskills.length} upskill${data.upskills.length === 1 ? '' : 's'}`}
+                    </div>
                   </div>
                 </div>
 
@@ -897,6 +979,133 @@ function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpT
                   onClick={() => onJumpToUpskill(u.id)} />
               ))}
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CTKPICard({ label, value, icon: Icon }) {
+  return (
+    <div style={{ background: BRAND.grey, border: `1px solid #333`, borderTop: `2px solid ${BRAND.orange}`, padding: '14px 16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+        {Icon && <Icon size={14} color={BRAND.orange} />}
+        <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>{label}</div>
+      </div>
+      <div className="display-font" style={{ fontSize: '28px', lineHeight: 1, color: BRAND.white }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function CTHoursPerTrainerChart({ trainers, hoursPerTrainer, marketFilter }) {
+  // Show only trainers with at least some hours, sorted descending. Cap to 10 to keep it readable.
+  const data = useMemo(() => {
+    return trainers
+      .filter(t => marketFilter === 'ALL' || t.market === marketFilter)
+      .map(t => ({ id: t.id, name: t.name, market: t.market, hours: hoursPerTrainer[t.id] || 0 }))
+      .filter(t => t.hours > 0)
+      .sort((a, b) => b.hours - a.hours)
+      .slice(0, 10);
+  }, [trainers, hoursPerTrainer, marketFilter]);
+
+  const maxHours = data.length > 0 ? data[0].hours : 0;
+
+  return (
+    <div style={{ background: BRAND.grey, border: `1px solid #333`, padding: '16px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '14px', gap: '8px' }}>
+        <h3 className="display-font" style={{ margin: 0, fontSize: '16px' }}>Hours per trainer</h3>
+        <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          on currently filtered tasks
+        </span>
+      </div>
+      {data.length === 0 ? (
+        <div style={{ padding: '20px 0', textAlign: 'center', color: '#666', fontStyle: 'italic', fontSize: '12px' }}>
+          No hours logged on currently visible tasks.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {data.map(d => {
+            const pct = maxHours > 0 ? (d.hours / maxHours) * 100 : 0;
+            return (
+              <div key={d.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 60px', alignItems: 'center', gap: '10px', fontSize: '11px' }}>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 700 }} title={`${d.name} (${d.market})`}>
+                  {d.name}
+                </div>
+                <div style={{ height: '14px', background: BRAND.black, position: 'relative' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: BRAND.orange, transition: 'width 0.3s ease' }} />
+                </div>
+                <div style={{ textAlign: 'right', fontFeatureSettings: '"tnum"', color: BRAND.orange, fontWeight: 700 }}>
+                  {d.hours.toFixed(1)}h
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CTMarketDonut({ tasksByMarket }) {
+  const total = Object.values(tasksByMarket).reduce((s, n) => s + n, 0);
+  // Brand-aligned hues for markets
+  const colors = { DK: BRAND.orange, NO: BRAND.yellow, SE: '#4ade80', FI: '#7dd3fc' };
+  const entries = Object.entries(tasksByMarket).filter(([, n]) => n > 0);
+
+  // SVG donut math
+  const size = 140;
+  const stroke = 22;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  let offset = 0;
+  const segments = entries.map(([market, count]) => {
+    const fraction = count / total;
+    const length = fraction * circumference;
+    const seg = {
+      market,
+      count,
+      color: colors[market] || '#666',
+      length,
+      offset,
+    };
+    offset += length;
+    return seg;
+  });
+
+  return (
+    <div style={{ background: BRAND.grey, border: `1px solid #333`, padding: '16px 20px' }}>
+      <h3 className="display-font" style={{ margin: '0 0 14px', fontSize: '16px' }}>Tasks by market</h3>
+      {total === 0 ? (
+        <div style={{ padding: '20px 0', textAlign: 'center', color: '#666', fontStyle: 'italic', fontSize: '12px' }}>
+          No tasks to display.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+            <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={BRAND.black} strokeWidth={stroke} />
+            {segments.map(seg => (
+              <circle key={seg.market}
+                cx={size/2} cy={size/2} r={radius}
+                fill="none" stroke={seg.color} strokeWidth={stroke}
+                strokeDasharray={`${seg.length} ${circumference - seg.length}`}
+                strokeDashoffset={-seg.offset}
+                transform={`rotate(-90 ${size/2} ${size/2})`} />
+            ))}
+            <text x={size/2} y={size/2 - 4} textAnchor="middle" fill={BRAND.white} fontSize="22" fontWeight="900" fontFamily="Archivo Black, Arial, sans-serif">{total}</text>
+            <text x={size/2} y={size/2 + 14} textAnchor="middle" fill="#999" fontSize="9" textTransform="uppercase" letterSpacing="0.1em">tasks</text>
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: 0 }}>
+            {entries.map(([market, count]) => (
+              <div key={market} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                <div style={{ width: '12px', height: '12px', background: colors[market] || '#666', flexShrink: 0 }} />
+                <div style={{ fontWeight: 700, flex: 1 }}>{market}</div>
+                <div style={{ color: '#bbb' }}>{count} ({((count/total)*100).toFixed(0)}%)</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
