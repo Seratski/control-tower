@@ -21,6 +21,7 @@ import {
   enrollAgentsOnCourse, unenrollAgentFromCourse, setCourseStatus,
   subscribeUpskills, createUpskill, updateUpskill, deleteUpskill,
   addAgentsToUpskill, removeAgentFromUpskill, setUpskillStatus,
+  subscribeTimeLogs, addTimeLog, deleteTimeLog,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -350,6 +351,10 @@ function Dashboard({ session, onLogout }) {
                 setSelectedCourse(null);
               }
             }}
+            onLogTime={() => {
+              const c = courses.find(x => x.id === selectedCourse);
+              setModal({ type: 'logTime', parentType: 'course', parentId: selectedCourse, parentLabel: c?.name || 'course' });
+            }}
             onJumpToAgent={(agentId) => {
               setSelectedCourse(null);
               setView('agent');
@@ -376,6 +381,12 @@ function Dashboard({ session, onLogout }) {
                 await deleteUpskill(selectedUpskill);
                 setSelectedUpskill(null);
               }
+            }}
+            onLogTime={() => {
+              const u = upskills.find(x => x.id === selectedUpskill);
+              const skill = skills.find(s => s.id === u?.skillId);
+              const label = u?.name || skill?.name || 'upskill';
+              setModal({ type: 'logTime', parentType: 'upskill', parentId: selectedUpskill, parentLabel: label });
             }}
             onJumpToAgent={(agentId) => {
               setSelectedUpskill(null);
@@ -421,6 +432,11 @@ function Dashboard({ session, onLogout }) {
         <EditUpskillModal upskillId={modal.upskillId} upskills={upskills}
           skills={skills} trainers={trainers} onClose={() => setModal(null)} />
       )}
+      {modal?.type === 'logTime' && (
+        <TimeLogModal parentType={modal.parentType} parentId={modal.parentId}
+          parentLabel={modal.parentLabel} session={session}
+          onClose={() => setModal(null)} />
+      )}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -442,7 +458,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v2.1 · Learning Operations</span>
+        <span>POWER · Control Tower v2.2 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -2034,7 +2050,158 @@ function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onN
   );
 }
 
-function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack, onEnroll, onEdit, onDelete, onJumpToAgent }) {
+// ============ TIME LOGS (C5) ============
+
+function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, session, onAddLog }) {
+  const [logs, setLogs] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!parentId) return;
+    return subscribeTimeLogs(parentType, parentId, setLogs);
+  }, [parentType, parentId]);
+
+  const totalHours = logs.reduce((sum, l) => sum + (l.hours || 0), 0);
+
+  const handleDelete = async (log) => {
+    if (!confirm(`Delete this time log entry?\n\n${log.date} · ${log.hours}h${log.note ? ' · ' + log.note : ''}`)) return;
+    try {
+      setError('');
+      await deleteTimeLog(parentType, parentId, log.id);
+    } catch (err) {
+      setError(err.message || 'Failed to delete');
+    }
+  };
+
+  return (
+    <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginTop: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>
+            Time logs
+          </h3>
+          <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+            <span style={{ color: BRAND.orange, fontWeight: 700, fontSize: '14px' }}>{totalHours.toFixed(1)}h</span> total · {logs.length} {logs.length === 1 ? 'entry' : 'entries'}
+          </div>
+        </div>
+        {!isLocked && (
+          <button onClick={onAddLog}
+            style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Clock size={12} /> Log time
+          </button>
+        )}
+      </div>
+
+      {isLocked && (
+        <div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '10px' }}>
+          {parentStatus === 'Completed' ? 'Completed — time logging closed.' : 'Cancelled — time logging closed.'}
+        </div>
+      )}
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginBottom: '10px' }}>{error}</div>}
+
+      {logs.length === 0 ? (
+        <em style={{ color: '#666', fontSize: '12px' }}>No time logged yet.</em>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {logs.map(log => (
+            <div key={log.id}
+              style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, color: BRAND.orange }}>{log.hours}h</span>
+                  <span style={{ fontSize: '11px', color: '#999' }}>{formatDate(log.date)}</span>
+                  <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>by {log.createdBy || 'Unknown'}</span>
+                </div>
+                {log.note && (
+                  <div style={{ fontSize: '12px', color: '#bbb', marginTop: '4px', lineHeight: 1.4 }}>{log.note}</div>
+                )}
+              </div>
+              <button onClick={() => handleDelete(log)} title="Delete entry"
+                style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimeLogModal({ parentType, parentId, parentLabel, session, onClose }) {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const [form, setForm] = useState({
+    date: todayIso,
+    hours: '',
+    note: '',
+  });
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setError(''); setProcessing(true);
+    try {
+      await addTimeLog(parentType, parentId, {
+        date: form.date,
+        hours: form.hours,
+        note: form.note,
+        createdBy: session.displayName,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to log time');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Log time</h3>
+      <div style={{ marginTop: '8px', color: '#bbb', fontSize: '12px' }}>
+        Logging time for <strong style={{ color: BRAND.orange }}>{parentLabel}</strong>.
+      </div>
+
+      <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
+        <div>
+          <FormLabel>Date *</FormLabel>
+          <input type="date" value={form.date} max={todayIso} onChange={(e) => setForm({ ...form, date: e.target.value })}
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+        <div>
+          <FormLabel>Hours *</FormLabel>
+          <input type="number" step="0.25" min="0.25" max="24" value={form.hours}
+            onChange={(e) => setForm({ ...form, hours: e.target.value })}
+            placeholder="e.g. 1.5"
+            style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <FormLabel>Note (optional)</FormLabel>
+        <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
+          placeholder="What did you work on?"
+          rows={3}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing || !form.hours}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || !form.hours) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: !form.hours ? 0.5 : 1 }}>
+          {processing ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack, onEnroll, onEdit, onDelete, onLogTime, onJumpToAgent }) {
   const course = courses.find(c => c.id === courseId);
   if (!course) return null;
 
@@ -2200,6 +2367,10 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
           )}
         </div>
       </div>
+
+      <TimeLogsPanel parentType="course" parentId={courseId} parentStatus={course.status}
+        isLocked={course.status === 'Completed' || course.status === 'Cancelled'}
+        session={session} onAddLog={onLogTime} />
     </div>
   );
 }
@@ -2703,7 +2874,7 @@ function UpskillListView({ upskills, skills, trainers, setSelectedUpskill, onNew
   );
 }
 
-function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, session, onBack, onAddAgents, onEdit, onDelete, onJumpToAgent }) {
+function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, session, onBack, onAddAgents, onEdit, onDelete, onLogTime, onJumpToAgent }) {
   const upskill = upskills.find(u => u.id === upskillId);
   const [statusError, setStatusError] = useState('');
   const [removeError, setRemoveError] = useState('');
@@ -2852,6 +3023,10 @@ function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, sess
           </div>
         )}
       </div>
+
+      <TimeLogsPanel parentType="upskill" parentId={upskillId} parentStatus={upskill.status}
+        isLocked={upskill.status === 'Completed' || upskill.status === 'Cancelled'}
+        session={session} onAddLog={onLogTime} />
     </div>
   );
 }
