@@ -115,7 +115,7 @@ function LoginScreen({ onLogin }) {
         <h1 className="display-font" style={{ fontSize: '32px', margin: '20px 0 4px', lineHeight: 1 }}>
           Control <span style={{ color: BRAND.orange }}>Tower</span>
         </h1>
-        <p style={{ fontSize: '12px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Learning Operations · Login</p>
+        <p style={{ fontSize: '12px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>Learning Unit · Login</p>
         <form onSubmit={handleLogin} style={{ marginTop: '30px' }}>
           <label style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Username</label>
           <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. mjensen" autoFocus required
@@ -219,7 +219,7 @@ function Dashboard({ session, onLogout }) {
                 Control <span style={{ color: BRAND.orange }}>Tower</span>
               </h1>
               <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '2px' }}>
-                Learning Operations · Customer Service
+                Learning Unit · Nordic Customer Service
               </div>
             </div>
           </div>
@@ -465,7 +465,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.0 · Learning Operations</span>
+        <span>POWER · Control Tower v3.0.1 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
