@@ -788,6 +788,48 @@ export async function bulkAssignTrainer(agentIds, newTrainerId, newTrainerName, 
   }
 }
 
+// ============ TIME LOGS (C5) ============
+// Time logs live as subcollections on /courses/{id}/timeLogs and /upskills/{id}/timeLogs.
+// Same shape on both: { date, hours, note, createdBy, createdAt }.
+// parentType is either 'course' or 'upskill'.
+
+const TIMELOG_PARENT_PATHS = { course: 'courses', upskill: 'upskills' };
+
+function timeLogsCollection(parentType, parentId) {
+  const parentPath = TIMELOG_PARENT_PATHS[parentType];
+  if (!parentPath) throw new Error(`Invalid parent type: ${parentType}`);
+  return collection(db, parentPath, parentId, 'timeLogs');
+}
+
+export function subscribeTimeLogs(parentType, parentId, callback) {
+  const q = query(timeLogsCollection(parentType, parentId), orderBy('date', 'desc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+export async function addTimeLog(parentType, parentId, { date, hours, note, createdBy }) {
+  const hoursNum = parseFloat(hours);
+  if (!hoursNum || hoursNum <= 0) throw new Error('Hours must be a positive number');
+  if (hoursNum > 24) throw new Error('A single log cannot exceed 24 hours');
+  if (!date) throw new Error('Date is required');
+  // Block future dates
+  const today = new Date().toISOString().split('T')[0];
+  if (date > today) throw new Error('Cannot log time for future dates');
+
+  await addDoc(timeLogsCollection(parentType, parentId), {
+    date,
+    hours: hoursNum,
+    note: (note || '').trim(),
+    createdBy: createdBy || 'Unknown',
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function deleteTimeLog(parentType, parentId, logId) {
+  const parentPath = TIMELOG_PARENT_PATHS[parentType];
+  if (!parentPath) throw new Error(`Invalid parent type: ${parentType}`);
+  await deleteDoc(doc(db, parentPath, parentId, 'timeLogs', logId));
+}
+
 // ============ TIMELINE ============
 export function subscribeTimeline(agentId, callback) {
   const q = query(collection(db, 'agents', agentId, 'timeline'), orderBy('createdAt', 'desc'));
