@@ -165,7 +165,20 @@ export async function updateCourse(courseId, updates) {
   if (updates.status !== undefined) cleanUpdates.status = updates.status;
   await updateDoc(doc(db, 'courses', courseId), cleanUpdates);
 }
-export async function deleteCourse(courseId) { await deleteDoc(doc(db, 'courses', courseId)); }
+/**
+ * UPDATED IN C6: Also clean up the timeLogs subcollection (Firestore does not
+ * cascade delete subcollections automatically — leaving orphans wastes space).
+ */
+export async function deleteCourse(courseId) {
+  // Clean up timeLogs first
+  try {
+    const logsSnap = await getDocs(collection(db, 'courses', courseId, 'timeLogs'));
+    await Promise.all(logsSnap.docs.map(d => deleteDoc(d.ref)));
+  } catch (err) {
+    console.warn('Could not clean up course timeLogs', err);
+  }
+  await deleteDoc(doc(db, 'courses', courseId));
+}
 
 /**
  * NEW IN C3: Enroll one or more agents on a course (idempotent — won't duplicate)
@@ -297,7 +310,18 @@ export async function updateUpskill(upskillId, updates) {
   await updateDoc(doc(db, 'upskills', upskillId), cleanUpdates);
 }
 
-export async function deleteUpskill(upskillId) { await deleteDoc(doc(db, 'upskills', upskillId)); }
+/**
+ * UPDATED IN C6: Also clean up the timeLogs subcollection.
+ */
+export async function deleteUpskill(upskillId) {
+  try {
+    const logsSnap = await getDocs(collection(db, 'upskills', upskillId, 'timeLogs'));
+    await Promise.all(logsSnap.docs.map(d => deleteDoc(d.ref)));
+  } catch (err) {
+    console.warn('Could not clean up upskill timeLogs', err);
+  }
+  await deleteDoc(doc(db, 'upskills', upskillId));
+}
 
 export async function addAgentsToUpskill(upskillId, newAgentIds, upskillLabel, actorName) {
   if (!Array.isArray(newAgentIds) || newAgentIds.length === 0) return;
