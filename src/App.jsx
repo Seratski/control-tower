@@ -245,6 +245,7 @@ function Dashboard({ session, onLogout }) {
             ...(isAdmin ? [{ id: 'recruitment', label: 'Recruitments', icon: Megaphone }] : []),
             ...(isAdmin ? [{ id: 'course', label: 'Courses', icon: BookOpen }] : []),
             ...(isAdmin ? [{ id: 'upskill', label: 'Upskills', icon: Zap }] : []),
+            ...(isAdmin ? [{ id: 'controltower', label: 'Control Tower', icon: Activity }] : []),
             ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: Settings }] : []),
           ].map(tab => {
             const Icon = tab.icon;
@@ -394,6 +395,12 @@ function Dashboard({ session, onLogout }) {
               setSelectedAgent(agentId);
             }} />
         )}
+        {view === 'controltower' && isAdmin && (
+          <ControlTowerView trainers={trainers} courses={courses} upskills={upskills}
+            skills={skills} agents={agents}
+            onJumpToCourse={(id) => { setView('course'); setSelectedCourse(id); }}
+            onJumpToUpskill={(id) => { setView('upskill'); setSelectedUpskill(id); }} />
+        )}
         {view === 'admin' && isAdmin && (
           <AdminView session={session} skills={skills} teams={teams} trainers={trainers} recruiters={recruiters} courseTypes={courseTypes}
             onManageTeams={() => setModal({ type: 'manageTeams' })}
@@ -458,7 +465,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v2.2 · Learning Operations</span>
+        <span>POWER · Control Tower v2.3 · Learning Operations</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -704,6 +711,235 @@ function RevertSlotModal({ slot, recruitmentId, recruitments, agents, session, o
           style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
       </div>
     </ModalShell>
+  );
+}
+
+// ============ CONTROL TOWER VIEW (C6) ============
+// Trainer-axis overview: who is teaching what, now and upcoming.
+
+function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpToCourse, onJumpToUpskill }) {
+  const [marketFilter, setMarketFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ACTIVE'); // default to "active": Planned + In progress
+  const [typeFilter, setTypeFilter] = useState('ALL');
+
+  // Helper: is a task "active" by our default definition?
+  const isActiveStatus = (s) => s === 'Planned' || s === 'In progress';
+
+  // Filter tasks based on the chosen status filter
+  const matchesStatusFilter = (task) => {
+    if (statusFilter === 'ALL') return true;
+    if (statusFilter === 'ACTIVE') return isActiveStatus(task.status);
+    return task.status === statusFilter;
+  };
+
+  const matchesMarketFilter = (task) => {
+    return marketFilter === 'ALL' || task.market === marketFilter;
+  };
+
+  const filteredCourses = useMemo(() => {
+    if (typeFilter === 'upskill') return [];
+    return courses.filter(c => matchesStatusFilter(c) && matchesMarketFilter(c));
+  }, [courses, statusFilter, marketFilter, typeFilter]);
+
+  const filteredUpskills = useMemo(() => {
+    if (typeFilter === 'course') return [];
+    return upskills.filter(u => matchesStatusFilter(u) && matchesMarketFilter(u));
+  }, [upskills, statusFilter, marketFilter, typeFilter]);
+
+  // Group tasks per trainer
+  const tasksByTrainer = useMemo(() => {
+    const map = new Map();
+    for (const t of trainers) map.set(t.id, { trainer: t, courses: [], upskills: [] });
+    for (const c of filteredCourses) {
+      if (c.trainerId && map.has(c.trainerId)) map.get(c.trainerId).courses.push(c);
+    }
+    for (const u of filteredUpskills) {
+      if (u.trainerId && map.has(u.trainerId)) map.get(u.trainerId).upskills.push(u);
+    }
+    return map;
+  }, [trainers, filteredCourses, filteredUpskills]);
+
+  // Sort: trainers with tasks first (most tasks first), then unassigned trainers
+  const sortedTrainers = useMemo(() => {
+    return [...trainers]
+      .filter(t => marketFilter === 'ALL' || t.market === marketFilter)
+      .sort((a, b) => {
+        const aData = tasksByTrainer.get(a.id);
+        const bData = tasksByTrainer.get(b.id);
+        const aCount = (aData?.courses.length || 0) + (aData?.upskills.length || 0);
+        const bCount = (bData?.courses.length || 0) + (bData?.upskills.length || 0);
+        if (aCount !== bCount) return bCount - aCount;
+        return a.name.localeCompare(b.name);
+      });
+  }, [trainers, tasksByTrainer, marketFilter]);
+
+  // Tasks without a trainer
+  const unassignedCourses = filteredCourses.filter(c => !c.trainerId);
+  const unassignedUpskills = filteredUpskills.filter(u => !u.trainerId);
+  const hasUnassigned = unassignedCourses.length > 0 || unassignedUpskills.length > 0;
+
+  const totalTasks = filteredCourses.length + filteredUpskills.length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+          Control Tower · {totalTasks} {totalTasks === 1 ? 'task' : 'tasks'}
+        </div>
+        <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+          Training <span style={{ color: BRAND.orange }}>overview</span>
+        </h2>
+        <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
+          What each trainer is currently working on. Click a card to jump to its detail view.
+        </div>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '24px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <FilterLabel>Market</FilterLabel>
+          <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Type</FilterLabel>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option>
+            <option value="course">Courses only</option>
+            <option value="upskill">Upskills only</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Status</FilterLabel>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ACTIVE">Active (Planned + In progress)</option>
+            <option value="Planned">Planned</option>
+            <option value="In progress">In progress</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
+            <option value="ALL">All</option>
+          </select>
+        </div>
+      </div>
+
+      {sortedTrainers.length === 0 ? (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
+          No trainers in {marketFilter === 'ALL' ? 'any market' : marketFilter}. Add trainers in Admin first.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {sortedTrainers.map(trainer => {
+            const data = tasksByTrainer.get(trainer.id) || { courses: [], upskills: [] };
+            const total = data.courses.length + data.upskills.length;
+            const isIdle = total === 0;
+            return (
+              <div key={trainer.id} style={{
+                background: BRAND.grey,
+                border: `1px solid #333`,
+                borderLeft: `3px solid ${isIdle ? '#444' : BRAND.orange}`,
+                padding: '16px 20px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: total > 0 ? '14px' : 0, gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                    <div style={{ width: '40px', height: '40px', background: isIdle ? '#222' : BRAND.orange, color: isIdle ? '#888' : BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: '14px' }} className="display-font">
+                      {trainer.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="display-font" style={{ fontSize: '18px', fontWeight: 700 }}>{trainer.name}</div>
+                      <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{trainer.market}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: isIdle ? '#666' : BRAND.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    {isIdle ? 'No active tasks' : `${data.courses.length} course${data.courses.length === 1 ? '' : 's'} · ${data.upskills.length} upskill${data.upskills.length === 1 ? '' : 's'}`}
+                  </div>
+                </div>
+
+                {total > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
+                    {data.courses.map(c => (
+                      <CTTaskCard key={`c_${c.id}`} type="course" task={c} skills={skills}
+                        agentCount={(c.enrolledAgentIds || []).length}
+                        onClick={() => onJumpToCourse(c.id)} />
+                    ))}
+                    {data.upskills.map(u => (
+                      <CTTaskCard key={`u_${u.id}`} type="upskill" task={u} skills={skills}
+                        agentCount={(u.agentIds || []).length}
+                        label={upskillLabel(u, skills)}
+                        onClick={() => onJumpToUpskill(u.id)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {hasUnassigned && (
+        <div style={{ marginTop: '24px' }}>
+          <h3 className="display-font" style={{ margin: '0 0 12px', fontSize: '20px', color: BRAND.yellow }}>
+            ⚠ Unassigned tasks ({unassignedCourses.length + unassignedUpskills.length})
+          </h3>
+          <div style={{ background: BRAND.grey, border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, padding: '16px 20px' }}>
+            <div style={{ fontSize: '11px', color: '#bbb', marginBottom: '12px' }}>
+              These tasks have no trainer assigned. Open them and assign one.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
+              {unassignedCourses.map(c => (
+                <CTTaskCard key={`uc_${c.id}`} type="course" task={c} skills={skills}
+                  agentCount={(c.enrolledAgentIds || []).length}
+                  onClick={() => onJumpToCourse(c.id)} />
+              ))}
+              {unassignedUpskills.map(u => (
+                <CTTaskCard key={`uu_${u.id}`} type="upskill" task={u} skills={skills}
+                  agentCount={(u.agentIds || []).length}
+                  label={upskillLabel(u, skills)}
+                  onClick={() => onJumpToUpskill(u.id)} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CTTaskCard({ type, task, skills, agentCount, label, onClick }) {
+  const Icon = type === 'course' ? BookOpen : Zap;
+  const displayName = label || task.name;
+  const skill = type === 'upskill' ? skills.find(s => s.id === task.skillId) : null;
+  const dateLine = task.startDate
+    ? (type === 'course' && task.endDate
+        ? `${formatDate(task.startDate)} → ${formatDate(task.endDate)}`
+        : `From ${formatDate(task.startDate)}`)
+    : (type === 'upskill' && task.deadline
+        ? `Due ${formatDate(task.deadline)}`
+        : null);
+
+  return (
+    <div onClick={onClick} className="hover-lift"
+      style={{ background: BRAND.black, border: `1px solid #333`, borderLeft: `3px solid ${courseStatusColor(task.status)}`, padding: '10px 12px', cursor: 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+        <Icon size={11} color={BRAND.orange} style={{ flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+          {displayName}
+        </span>
+        <span style={{ fontSize: '8px', padding: '2px 6px', background: courseStatusColor(task.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, whiteSpace: 'nowrap' }}>
+          {task.status}
+        </span>
+      </div>
+      <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {type === 'course' ? 'Course' : 'Upskill'} · {task.market}
+        {skill && <> · {skill.name}</>}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '10px', color: '#bbb' }}>
+        <span>
+          <Users size={9} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px', color: BRAND.orange }} />
+          <strong style={{ color: BRAND.orange }}>{agentCount}</strong> agent{agentCount === 1 ? '' : 's'}
+        </span>
+        {dateLine && <span style={{ color: '#999' }}>{dateLine}</span>}
+      </div>
+    </div>
   );
 }
 
