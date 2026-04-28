@@ -13,6 +13,7 @@ import {
   subscribeTeams, subscribeTrainers, subscribeRecruiters, subscribeRecruitments,
   toggleAgentSkill, updateSkillTarget, createSkill, updateSkill, deleteSkill,
   createAgent, updateAgent, deleteAgent, changeAgentTeam, changeAgentTrainer,
+  terminateAgent, reactivateAgent,
   createTeam, updateTeam, deleteTeam,
   createTrainer, updateTrainer, deleteTrainer,
   createRecruiter, updateRecruiter, deleteRecruiter,
@@ -173,9 +174,11 @@ function Dashboard({ session, onLogout }) {
   }, []);
 
   const skillStats = useMemo(() => {
+    // D1: terminated agents don't count towards skill coverage
+    const activeAgents = agents.filter(a => a.status !== 'Terminated');
     return skills.map(skill => {
-      const agentsWithSkill = agents.filter(a => (a.skills || []).includes(skill.id));
-      const actualPct = agents.length > 0 ? (agentsWithSkill.length / agents.length) * 100 : 0;
+      const agentsWithSkill = activeAgents.filter(a => (a.skills || []).includes(skill.id));
+      const actualPct = activeAgents.length > 0 ? (agentsWithSkill.length / activeAgents.length) * 100 : 0;
       return { ...skill, agentCount: agentsWithSkill.length, actualPct, gap: skill.targetVolumePct - actualPct, agents: agentsWithSkill };
     });
   }, [skills, agents]);
@@ -290,17 +293,24 @@ function Dashboard({ session, onLogout }) {
               setView('upskill');
               setSelectedUpskill(upskillId);
             }}
+            onTerminateAgent={() => setModal({ type: 'terminateAgent', agentId: selectedAgent })}
+            onReactivateAgent={async () => {
+              if (confirm('Reactivate this agent? Their previous skills and history will be restored to active state.')) {
+                await reactivateAgent(selectedAgent, session.displayName);
+              }
+            }}
             onDeleteAgent={async () => {
               const agent = agents.find(a => a.id === selectedAgent);
               const linkedRec = agent?.recruitmentId ? recruitments.find(r => r.id === agent.recruitmentId) : null;
               const msg = linkedRec
-                ? `Delete this agent and all history?\n\nThe slot in recruitment "${linkedRec.name}" will be freed up.`
-                : 'Delete this agent and all history?';
+                ? `Delete this agent profile entirely?\n\nThe slot in recruitment "${linkedRec.name}" will be freed up. This is for fresh-mistake cleanup only — for real off-boarding use Terminate instead.`
+                : 'Delete this agent profile entirely?\n\nThis is for fresh-mistake cleanup only — for real off-boarding use Terminate instead.';
               if (confirm(msg)) {
                 await deleteAgent(selectedAgent);
                 setSelectedAgent(null);
               }
             }} />
+        )}
         )}
         {view === 'skill' && !selectedSkill && (
           <SkillListView skillStats={skillStats} setSelectedSkill={setSelectedSkill} isAdmin={isAdmin} onManageSkills={() => setModal({ type: 'manageSkills' })} />
@@ -411,6 +421,10 @@ function Dashboard({ session, onLogout }) {
       </main>
 
       {modal?.type === 'comment' && <CommentModal agentId={modal.agentId} session={session} onClose={() => setModal(null)} />}
+      {modal?.type === 'terminateAgent' && (
+        <TerminateAgentModal agentId={modal.agentId} agents={agents} session={session}
+          onClose={() => setModal(null)} />
+      )}
       {modal?.type === 'agent' && <NewAgentModal session={session} teams={teams} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'manageSkills' && <ManageSkillsModal skills={skills} skillStats={skillStats} onClose={() => setModal(null)} />}
       {modal?.type === 'manageTeams' && <ManageTeamsModal teams={teams} agents={agents} onClose={() => setModal(null)} />}
@@ -465,7 +479,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.0.1 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.1 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -1153,11 +1167,13 @@ function CTTaskCard({ type, task, skills, agentCount, label, onClick }) {
 }
 
 function OverviewView({ agents, skillStats, setView, setSelectedAgent }) {
-  const totalAgents = agents.length;
+  // D1: exclude terminated from active counts
+  const activeAgentsList = agents.filter(a => a.status !== 'Terminated');
+  const totalAgents = activeAgentsList.length;
   const activeAgents = agents.filter(a => a.status === 'Active').length;
   const onboardingAgents = agents.filter(a => a.status === 'Onboarding').length;
   const criticalSkills = skillStats.filter(s => s.gap > 10).length;
-  const avgSkillsPerAgent = agents.length ? (agents.reduce((sum, a) => sum + (a.skills || []).length, 0) / agents.length).toFixed(1) : 0;
+  const avgSkillsPerAgent = activeAgentsList.length ? (activeAgentsList.reduce((sum, a) => sum + (a.skills || []).length, 0) / activeAgentsList.length).toFixed(1) : 0;
 
   return (
     <div>
@@ -1251,6 +1267,7 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
   const [recruitmentFilter, setRecruitmentFilter] = useState('ALL');
   const [skillHasFilter, setSkillHasFilter] = useState('ANY');
   const [startDateFilter, setStartDateFilter] = useState('ALL');
+  const [showTerminated, setShowTerminated] = useState(false);
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [selected, setSelected] = useState(new Set());
@@ -1259,6 +1276,8 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
 
   const filtered = useMemo(() => {
     let list = agents.filter(a => {
+      // D1: hide terminated by default
+      if (!showTerminated && a.status === 'Terminated') return false;
       if (marketFilter !== 'ALL' && a.market !== marketFilter) return false;
       if (teamFilter !== 'ALL') {
         if (teamFilter === 'NONE' && a.teamId) return false;
@@ -1299,14 +1318,17 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
       return 0;
     });
     return list;
-  }, [agents, search, marketFilter, teamFilter, statusFilter, trainerFilter, recruitmentFilter, skillHasFilter, startDateFilter, sortBy, sortDir]);
+  }, [agents, search, marketFilter, teamFilter, statusFilter, trainerFilter, recruitmentFilter, skillHasFilter, startDateFilter, showTerminated, sortBy, sortDir]);
 
   const resetFilters = () => {
     setSearch(''); setMarketFilter('ALL'); setTeamFilter('ALL'); setStatusFilter('ALL');
     setTrainerFilter('ALL'); setRecruitmentFilter('ALL'); setSkillHasFilter('ANY'); setStartDateFilter('ALL');
+    setShowTerminated(false);
   };
   const hasActiveFilters = search || marketFilter !== 'ALL' || teamFilter !== 'ALL' || statusFilter !== 'ALL' ||
-    trainerFilter !== 'ALL' || recruitmentFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL';
+    trainerFilter !== 'ALL' || recruitmentFilter !== 'ALL' || skillHasFilter !== 'ANY' || startDateFilter !== 'ALL' || showTerminated;
+
+  const terminatedCount = agents.filter(a => a.status === 'Terminated').length;
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -1428,6 +1450,13 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
               <option value="ALL">Any</option><option value="30">Last 30d</option><option value="90">Last 90d</option><option value="365">Last 12m</option>
             </select>
           </div>
+          {terminatedCount > 0 && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: showTerminated ? BRAND.orange : '#999', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, height: '34px', alignSelf: 'flex-end', padding: '0 10px', border: `1px solid ${showTerminated ? BRAND.orange : '#444'}`, whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={showTerminated} onChange={(e) => setShowTerminated(e.target.checked)}
+                style={{ accentColor: BRAND.orange, cursor: 'pointer' }} />
+              Show terminated ({terminatedCount})
+            </label>
+          )}
           {hasActiveFilters && (
             <button onClick={resetFilters} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', height: '34px', alignSelf: 'flex-end' }}>
               <X size={12} /> Clear
@@ -1484,9 +1513,10 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
               const trainer = trainers.find(t => t.id === a.trainerId);
               const agentSkills = skills.filter(s => (a.skills || []).includes(s.id));
               const isSelected = selected.has(a.id);
+              const isTerminated = a.status === 'Terminated';
               return (
                 <tr key={a.id} className={`agent-row ${isSelected ? 'selected' : ''}`}
-                  style={{ cursor: 'pointer', borderTop: `1px solid #333` }}>
+                  style={{ cursor: 'pointer', borderTop: `1px solid #333`, opacity: isTerminated ? 0.55 : 1 }}>
                   {isAdmin && (
                     <td style={{ padding: '10px 12px', width: '40px' }} onClick={(e) => { e.stopPropagation(); toggleSelection(a.id); }}>
                       <div style={{ cursor: 'pointer', display: 'inline-flex' }}>
@@ -1494,13 +1524,16 @@ function AgentListView({ agents, skills, teams, trainers, recruitments, setSelec
                       </div>
                     </td>
                   )}
-                  <td style={{ padding: '10px 12px', fontWeight: 700 }} onClick={() => setSelectedAgent(a.id)}>{a.name}</td>
+                  <td style={{ padding: '10px 12px', fontWeight: 700 }} onClick={() => setSelectedAgent(a.id)}>
+                    {a.name}
+                    {isTerminated && <span style={{ marginLeft: '6px', fontSize: '9px', color: BRAND.red, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>terminated</span>}
+                  </td>
                   <td style={{ padding: '10px 12px', textAlign: 'center', color: '#bbb' }} onClick={() => setSelectedAgent(a.id)}>{a.market}</td>
                   <td style={{ padding: '10px 12px', color: team ? BRAND.white : '#666', fontSize: '12px' }} onClick={() => setSelectedAgent(a.id)}>
                     {team ? team.name : <span style={{ fontStyle: 'italic' }}>—</span>}
                   </td>
                   <td style={{ padding: '10px 12px' }} onClick={() => setSelectedAgent(a.id)}>
-                    <span style={{ fontSize: '10px', padding: '3px 8px', background: a.status === 'Onboarding' ? BRAND.yellow : BRAND.orange, color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>{a.status}</span>
+                    <span style={{ fontSize: '10px', padding: '3px 8px', background: isTerminated ? '#444' : (a.status === 'Onboarding' ? BRAND.yellow : BRAND.orange), color: isTerminated ? '#bbb' : BRAND.black, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>{a.status}</span>
                   </td>
                   <td style={{ padding: '10px 12px' }} onClick={() => setSelectedAgent(a.id)}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxWidth: '280px' }}>
@@ -1594,7 +1627,7 @@ function FilterLabel({ children }) {
   return <div style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>{children}</div>;
 }
 
-function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, courses, upskills, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onJumpToRecruitment, onJumpToCourse, onJumpToUpskill }) {
+function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitments, courses, upskills, isAdmin, session, onBack, onToggleSkill, onAddComment, onDeleteAgent, onTerminateAgent, onReactivateAgent, onJumpToRecruitment, onJumpToCourse, onJumpToUpskill }) {
   const [timeline, setTimeline] = useState([]);
   const [editTeam, setEditTeam] = useState(false);
   const [editTrainer, setEditTrainer] = useState(false);
@@ -1624,27 +1657,63 @@ function AgentDetailView({ agentId, agents, skills, teams, trainers, recruitment
     setEditTrainer(false);
   };
 
+  // D1: termination flow + restricted delete
+  const isTerminated = agent.status === 'Terminated';
+  const isLinkedToActiveStuff = (agent.skills || []).length > 0
+    || (courses || []).some(c => (c.enrolledAgentIds || []).includes(agent.id))
+    || (upskills || []).some(u => (u.agentIds || []).includes(agent.id))
+    || !!agent.recruitmentId;
+  // "Fresh" = nothing happened yet beyond the auto profile creation
+  const isFresh = !isLinkedToActiveStuff && timeline.length <= 1;
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
         <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
         {isAdmin && (
-          <button onClick={onDeleteAgent} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Trash2 size={12} /> Delete agent
-          </button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {isTerminated ? (
+              <button onClick={onReactivateAgent}
+                style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <UserCheck size={12} /> Reactivate
+              </button>
+            ) : (
+              <>
+                {isFresh && (
+                  <button onClick={onDeleteAgent} title="Delete profile entirely (only available on fresh agents with no activity)"
+                    style={{ background: 'transparent', border: `1px solid #555`, color: '#999', padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Trash2 size={12} /> Delete (mistake)
+                  </button>
+                )}
+                <button onClick={onTerminateAgent}
+                  style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <LogOut size={12} /> Terminate
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', flexWrap: 'wrap' }}>
-        <div style={{ width: '80px', height: '80px', background: BRAND.orange, color: BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px' }} className="display-font">{initials}</div>
+        <div style={{ width: '80px', height: '80px', background: isTerminated ? '#444' : BRAND.orange, color: isTerminated ? '#888' : BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px' }} className="display-font">{initials}</div>
         <div>
-          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>{agent.market} · {agent.status}</div>
-          <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{agent.name}</h2>
+          <div style={{ fontSize: '11px', color: isTerminated ? BRAND.red : BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            {agent.market} · {agent.status}
+            {isTerminated && agent.terminatedDate && <> · as of {formatDate(agent.terminatedDate)}</>}
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1, opacity: isTerminated ? 0.6 : 1 }}>{agent.name}</h2>
           <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
             Started {formatDate(agent.startDate)} · {(agent.skills || []).length} skills · {timeline.length} events
           </div>
         </div>
       </div>
+
+      {isTerminated && (
+        <div style={{ background: BRAND.grey, padding: '12px 16px', border: `1px solid ${BRAND.red}`, borderLeft: `3px solid ${BRAND.red}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
+          <strong style={{ color: BRAND.red }}>Terminated agent.</strong> Profile is preserved for historic record. Skills and history shown here reflect the state at termination. Click <strong>Reactivate</strong> if this was a mistake.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '32px' }}>
         <InfoPill icon={Users2} label="Team">
@@ -3891,6 +3960,8 @@ function SkillDetailView({ skill, agents, isAdmin, onBack, onUpdateTarget, onTog
 }
 
 function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill }) {
+  // D1: hide terminated agents from the skill matrix
+  const visibleAgents = agents.filter(a => a.status !== 'Terminated');
   return (
     <div>
       <h2 className="display-font" style={{ fontSize: '42px', margin: '0 0 20px', lineHeight: 1 }}>Skill <span style={{ color: BRAND.orange }}>matrix</span></h2>
@@ -3905,7 +3976,7 @@ function MatrixView({ skillStats, agents, isAdmin, onUpdateTarget, onToggleSkill
             </tr>
           </thead>
           <tbody>
-            {agents.map(a => (
+            {visibleAgents.map(a => (
               <tr key={a.id} style={{ borderTop: `1px solid #333` }}>
                 <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '13px' }}>{a.name}</td>
                 {skillStats.map(s => {
@@ -4106,6 +4177,80 @@ function CommentModal({ agentId, session, onClose }) {
       <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Cancel</button>
         <button onClick={save} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Save</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function TerminateAgentModal({ agentId, agents, session, onClose }) {
+  const agent = agents.find(a => a.id === agentId);
+  const todayIso = new Date().toISOString().split('T')[0];
+  const [terminationDate, setTerminationDate] = useState(todayIso);
+  const [formSubmitted, setFormSubmitted] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!agent) return null;
+
+  const formUrl = 'https://app.clickup.com/forms/4575366/f/4bm46-92252/R935TDHAOXL0SNQTCH';
+
+  const save = async () => {
+    if (!formSubmitted) { setError('You must confirm the ClickUp form was submitted'); return; }
+    if (!terminationDate) { setError('Termination date is required'); return; }
+    setError(''); setProcessing(true);
+    try {
+      await terminateAgent(agentId, terminationDate, session.displayName);
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to terminate');
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>Terminate agent</h3>
+      <div style={{ marginTop: '8px', color: '#bbb', fontSize: '13px' }}>
+        You are about to mark <strong style={{ color: BRAND.white }}>{agent.name}</strong> as terminated. Their profile and history are preserved for record-keeping but they'll no longer count as active.
+      </div>
+
+      <div style={{ marginTop: '20px', padding: '14px', background: BRAND.black, border: `1px solid ${BRAND.yellow}`, borderLeft: `3px solid ${BRAND.yellow}` }}>
+        <div style={{ fontSize: '11px', color: BRAND.yellow, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '8px' }}>
+          ⚠ Required step — submit ClickUp form first
+        </div>
+        <div style={{ fontSize: '12px', color: '#bbb', lineHeight: 1.5, marginBottom: '10px' }}>
+          Terminations must always be registered in the ClickUp termination form. Open it, fill it in, submit it, then come back here.
+        </div>
+        <a href={formUrl} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'inline-block', background: BRAND.yellow, color: BRAND.black, padding: '8px 14px', textDecoration: 'none', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          Open ClickUp termination form ↗
+        </a>
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginTop: '16px', cursor: 'pointer', padding: '10px', background: formSubmitted ? '#1a1a1a' : 'transparent', border: `1px solid ${formSubmitted ? BRAND.orange : '#444'}` }}>
+        <input type="checkbox" checked={formSubmitted} onChange={(e) => setFormSubmitted(e.target.checked)}
+          style={{ marginTop: '2px', flexShrink: 0, accentColor: BRAND.orange, width: '16px', height: '16px', cursor: 'pointer' }} />
+        <span style={{ fontSize: '13px', color: BRAND.white, lineHeight: 1.4 }}>
+          I have submitted the ClickUp termination form for this agent.
+        </span>
+      </label>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Termination date *</FormLabel>
+        <input type="date" value={terminationDate} max={todayIso} onChange={(e) => setTerminationDate(e.target.value)}
+          style={{ width: '100%', padding: '10px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing || !formSubmitted}
+          title={!formSubmitted ? 'Tick the checkbox above first' : ''}
+          style={{ background: formSubmitted ? BRAND.red : '#444', color: formSubmitted ? BRAND.white : '#888', border: 'none', padding: '10px 20px', cursor: (processing || !formSubmitted) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: !formSubmitted ? 0.6 : 1 }}>
+          {processing ? 'Terminating...' : 'Terminate agent'}
+        </button>
       </div>
     </ModalShell>
   );
