@@ -364,7 +364,8 @@ function Dashboard({ session, onLogout }) {
             }}
             onLogTime={() => {
               const c = courses.find(x => x.id === selectedCourse);
-              setModal({ type: 'logTime', parentType: 'course', parentId: selectedCourse, parentLabel: c?.name || 'course' });
+              setModal({ type: 'logTime', parentType: 'course', parentId: selectedCourse,
+                parentLabel: c?.name || 'course', parentMarket: c?.market, primaryTrainerId: c?.trainerId });
             }}
             onJumpToAgent={(agentId) => {
               setSelectedCourse(null);
@@ -397,7 +398,8 @@ function Dashboard({ session, onLogout }) {
               const u = upskills.find(x => x.id === selectedUpskill);
               const skill = skills.find(s => s.id === u?.skillId);
               const label = u?.name || skill?.name || 'upskill';
-              setModal({ type: 'logTime', parentType: 'upskill', parentId: selectedUpskill, parentLabel: label });
+              setModal({ type: 'logTime', parentType: 'upskill', parentId: selectedUpskill,
+                parentLabel: label, parentMarket: u?.market, primaryTrainerId: u?.trainerId });
             }}
             onJumpToAgent={(agentId) => {
               setSelectedUpskill(null);
@@ -455,7 +457,8 @@ function Dashboard({ session, onLogout }) {
       )}
       {modal?.type === 'logTime' && (
         <TimeLogModal parentType={modal.parentType} parentId={modal.parentId}
-          parentLabel={modal.parentLabel} session={session}
+          parentLabel={modal.parentLabel} parentMarket={modal.parentMarket} primaryTrainerId={modal.primaryTrainerId}
+          trainers={trainers} session={session}
           onClose={() => setModal(null)} />
       )}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
@@ -479,7 +482,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.1 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.2 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -2566,7 +2569,7 @@ function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onN
 
 // ============ TIME LOGS (C5) ============
 
-function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, session, onAddLog }) {
+function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers, session, onAddLog }) {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState('');
 
@@ -2586,6 +2589,8 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, session, 
       setError(err.message || 'Failed to delete');
     }
   };
+
+  const trainerName = (id) => (trainers || []).find(t => t.id === id)?.name;
 
   return (
     <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginTop: '24px' }}>
@@ -2618,50 +2623,67 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, session, 
         <em style={{ color: '#666', fontSize: '12px' }}>No time logged yet.</em>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {logs.map(log => (
-            <div key={log.id}
-              style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 700, color: BRAND.orange }}>{log.hours}h</span>
-                  <span style={{ fontSize: '11px', color: '#999' }}>{formatDate(log.date)}</span>
-                  <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>by {log.createdBy || 'Unknown'}</span>
+          {logs.map(log => {
+            const tName = log.trainerId ? trainerName(log.trainerId) : null;
+            return (
+              <div key={log.id}
+                style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700, color: BRAND.orange }}>{log.hours}h</span>
+                    <span style={{ fontSize: '11px', color: '#999' }}>{formatDate(log.date)}</span>
+                    {tName && (
+                      <span style={{ fontSize: '11px', color: BRAND.white, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <Briefcase size={10} color={BRAND.orange} />
+                        {tName}
+                      </span>
+                    )}
+                    {!tName && log.trainerId && (
+                      <span style={{ fontSize: '10px', color: '#666', fontStyle: 'italic' }}>(trainer not found)</span>
+                    )}
+                    <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>logged by {log.createdBy || 'Unknown'}</span>
+                  </div>
+                  {log.note && (
+                    <div style={{ fontSize: '12px', color: '#bbb', marginTop: '4px', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{log.note}</div>
+                  )}
                 </div>
-                {log.note && (
-                  <div style={{ fontSize: '12px', color: '#bbb', marginTop: '4px', lineHeight: 1.4 }}>{log.note}</div>
-                )}
+                <button onClick={() => handleDelete(log)} title="Delete entry"
+                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                  <X size={14} />
+                </button>
               </div>
-              <button onClick={() => handleDelete(log)} title="Delete entry"
-                style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
-                onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
-                onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
-                <X size={14} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-function TimeLogModal({ parentType, parentId, parentLabel, session, onClose }) {
+function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primaryTrainerId, trainers, session, onClose }) {
   const todayIso = new Date().toISOString().split('T')[0];
+  // Available trainers: market-filtered (D2: only trainers from the task's market)
+  const availableTrainers = (trainers || []).filter(t => !parentMarket || t.market === parentMarket);
   const [form, setForm] = useState({
     date: todayIso,
     hours: '',
     note: '',
+    trainerId: primaryTrainerId || '',
   });
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
+    if (!form.trainerId) { setError('Trainer is required'); return; }
     setError(''); setProcessing(true);
     try {
       await addTimeLog(parentType, parentId, {
         date: form.date,
         hours: form.hours,
         note: form.note,
+        trainerId: form.trainerId,
         createdBy: session.displayName,
       });
       onClose();
@@ -2675,7 +2697,7 @@ function TimeLogModal({ parentType, parentId, parentLabel, session, onClose }) {
     <ModalShell onClose={() => !processing && onClose()}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '22px' }}>Log time</h3>
       <div style={{ marginTop: '8px', color: '#bbb', fontSize: '12px' }}>
-        Logging time for <strong style={{ color: BRAND.orange }}>{parentLabel}</strong>.
+        Logging time for <strong style={{ color: BRAND.orange }}>{parentLabel}</strong>{parentMarket && <> ({parentMarket})</>}.
       </div>
 
       <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
@@ -2694,9 +2716,25 @@ function TimeLogModal({ parentType, parentId, parentLabel, session, onClose }) {
       </div>
 
       <div style={{ marginTop: '12px' }}>
-        <FormLabel>Note (optional)</FormLabel>
+        <FormLabel>Trainer who did the work *</FormLabel>
+        <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }}>
+          <option value="">— Pick a trainer —</option>
+          {availableTrainers.map(t => (
+            <option key={t.id} value={t.id}>
+              {t.name}{t.id === primaryTrainerId ? ' (primary)' : ''}
+            </option>
+          ))}
+        </select>
+        {availableTrainers.length === 0 && parentMarket && (
+          <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {parentMarket}</div>
+        )}
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <FormLabel>Status note (optional)</FormLabel>
         <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
-          placeholder="What did you work on?"
+          placeholder="What was covered? Any blockers or next steps?"
           rows={3}
           style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
       </div>
@@ -2706,8 +2744,8 @@ function TimeLogModal({ parentType, parentId, parentLabel, session, onClose }) {
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} disabled={processing}
           style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
-        <button onClick={save} disabled={processing || !form.hours}
-          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || !form.hours) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: !form.hours ? 0.5 : 1 }}>
+        <button onClick={save} disabled={processing || !form.hours || !form.trainerId}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: (processing || !form.hours || !form.trainerId) ? 'not-allowed' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px', opacity: (!form.hours || !form.trainerId) ? 0.5 : 1 }}>
           {processing ? 'Saving...' : 'Save'}
         </button>
       </div>
@@ -2806,6 +2844,13 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
         </InfoPill>
       </div>
 
+      {course.description && (
+        <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.orange}`, marginBottom: '24px' }}>
+          <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '6px' }}>About this course</div>
+          <div style={{ fontSize: '13px', color: '#ddd', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{course.description}</div>
+        </div>
+      )}
+
       {/* Status switcher */}
       <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
@@ -2884,6 +2929,7 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
 
       <TimeLogsPanel parentType="course" parentId={courseId} parentStatus={course.status}
         isLocked={course.status === 'Completed' || course.status === 'Cancelled'}
+        trainers={trainers}
         session={session} onAddLog={onLogTime} />
     </div>
   );
@@ -2892,6 +2938,7 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
 function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
   const [form, setForm] = useState({
     name: preset?.name || '',
+    description: preset?.description || '',
     courseTypeId: preset?.courseTypeId || '',
     market: preset?.market || 'DK',
     trainerId: preset?.trainerId || '',
@@ -3005,6 +3052,17 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
           <FormLabel>End date</FormLabel>
           <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
             style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Description (optional, max 250 chars)</FormLabel>
+        <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value.slice(0, 250) })}
+          placeholder="Short intro: what is this course about, what to expect..."
+          rows={3}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+        <div style={{ fontSize: '10px', color: '#666', textAlign: 'right', marginTop: '2px' }}>
+          {form.description.length}/250
         </div>
       </div>
 
@@ -3139,6 +3197,7 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
   const course = courses.find(c => c.id === courseId);
   const [form, setForm] = useState({
     name: course?.name || '',
+    description: course?.description || '',
     courseTypeId: course?.courseTypeId || '',
     trainerId: course?.trainerId || '',
     startDate: course?.startDate || '',
@@ -3213,6 +3272,17 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
           <FormLabel>End date</FormLabel>
           <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })}
             style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', colorScheme: 'dark' }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '16px' }}>
+        <FormLabel>Description (optional, max 250 chars)</FormLabel>
+        <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value.slice(0, 250) })}
+          placeholder="Short intro: what is this course about, what to expect..."
+          rows={3}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+        <div style={{ fontSize: '10px', color: '#666', textAlign: 'right', marginTop: '2px' }}>
+          {form.description.length}/250
         </div>
       </div>
 
@@ -3540,6 +3610,7 @@ function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, sess
 
       <TimeLogsPanel parentType="upskill" parentId={upskillId} parentStatus={upskill.status}
         isLocked={upskill.status === 'Completed' || upskill.status === 'Cancelled'}
+        trainers={trainers}
         session={session} onAddLog={onLogTime} />
     </div>
   );
