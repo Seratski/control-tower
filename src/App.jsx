@@ -527,7 +527,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.3 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.4 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -886,8 +886,16 @@ function AnnouncementListView({ announcements, trainers, setSelectedAnnouncement
                 })}
               </div>
 
-              <div style={{ paddingTop: '10px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#999' }}>
-                <span>By {a.createdBy}</span>
+              <div style={{ paddingTop: '10px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#999', flexWrap: 'wrap', gap: '6px' }}>
+                <span>
+                  By {a.createdBy}
+                  {(a.bullets?.length > 0 || a.links?.length > 0) && (
+                    <span style={{ marginLeft: '8px', color: '#666' }}>
+                      {a.bullets?.length > 0 && <>· {a.bullets.length} {a.bullets.length === 1 ? 'point' : 'points'}</>}
+                      {a.links?.length > 0 && <> · {a.links.length} {a.links.length === 1 ? 'link' : 'links'}</>}
+                    </span>
+                  )}
+                </span>
                 <span>
                   <strong style={{ color: allDone ? '#4ade80' : BRAND.orange }}>{completed}/{total}</strong> markets done
                 </span>
@@ -949,6 +957,35 @@ function AnnouncementDetailView({ announcementId, announcements, trainers, sessi
         </div>
       )}
 
+      {(announcement.bullets || []).length > 0 && (
+        <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.orange}`, marginBottom: '24px' }}>
+          <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '10px' }}>Key points</div>
+          <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {(announcement.bullets || []).map(b => (
+              <li key={b.id} style={{ fontSize: '13px', color: '#ddd', lineHeight: 1.5 }}>{b.text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {(announcement.links || []).length > 0 && (
+        <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.orange}`, marginBottom: '24px' }}>
+          <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '10px' }}>Reference links</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {(announcement.links || []).map(l => (
+              <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer"
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: BRAND.black, border: `1px solid #333`, borderLeft: `3px solid ${BRAND.orange}`, color: BRAND.white, textDecoration: 'none', fontSize: '13px' }}>
+                <span style={{ color: BRAND.orange, flexShrink: 0 }}>↗</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <strong>{l.label || l.url}</strong>
+                  {l.label && <span style={{ color: '#666', fontSize: '11px', marginLeft: '8px' }}>{l.url}</span>}
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
         <strong style={{ color: BRAND.yellow }}>Read-only for now.</strong> Self-assign and per-market status changes are coming in the next iteration. Below shows what each market state will look like.
       </div>
@@ -995,6 +1032,8 @@ function AnnouncementModal({ mode, announcementId, announcements, session, onClo
   const [form, setForm] = useState({
     title: existing?.title || '',
     description: existing?.description || '',
+    bullets: (existing?.bullets || []).map(b => ({ ...b })),
+    links: (existing?.links || []).map(l => ({ ...l })),
     markets: existing?.markets || [],
   });
   const [processing, setProcessing] = useState(false);
@@ -1005,9 +1044,51 @@ function AnnouncementModal({ mode, announcementId, announcements, session, onClo
     setForm({ ...form, markets: has ? form.markets.filter(x => x !== m) : [...form.markets, m] });
   };
 
+  // ---- Bullets handlers ----
+  const addBullet = () => {
+    setForm(f => ({ ...f, bullets: [...f.bullets, { id: `b_${Date.now()}_${f.bullets.length}`, text: '' }] }));
+  };
+  const updateBulletText = (i, text) => {
+    setForm(f => ({ ...f, bullets: f.bullets.map((b, j) => j === i ? { ...b, text } : b) }));
+  };
+  const removeBullet = (i) => {
+    setForm(f => ({ ...f, bullets: f.bullets.filter((_, j) => j !== i) }));
+  };
+  const moveBullet = (i, dir) => {
+    const newIdx = i + dir;
+    if (newIdx < 0 || newIdx >= form.bullets.length) return;
+    const next = [...form.bullets];
+    [next[i], next[newIdx]] = [next[newIdx], next[i]];
+    setForm(f => ({ ...f, bullets: next }));
+  };
+
+  // ---- Links handlers ----
+  const addLink = () => {
+    setForm(f => ({ ...f, links: [...f.links, { id: `l_${Date.now()}_${f.links.length}`, label: '', url: '' }] }));
+  };
+  const updateLinkField = (i, field, value) => {
+    setForm(f => ({ ...f, links: f.links.map((l, j) => j === i ? { ...l, [field]: value } : l) }));
+  };
+  const removeLink = (i) => {
+    setForm(f => ({ ...f, links: f.links.filter((_, j) => j !== i) }));
+  };
+  const moveLink = (i, dir) => {
+    const newIdx = i + dir;
+    if (newIdx < 0 || newIdx >= form.links.length) return;
+    const next = [...form.links];
+    [next[i], next[newIdx]] = [next[newIdx], next[i]];
+    setForm(f => ({ ...f, links: next }));
+  };
+
   const save = async () => {
     if (!form.title.trim()) { setError('Title is required'); return; }
     if (form.markets.length === 0) { setError('Pick at least one market'); return; }
+    // Validate links: any link with a URL must look URL-ish
+    for (const l of form.links) {
+      if (l.url.trim() && !/^https?:\/\//i.test(l.url.trim())) {
+        setError(`Link URL must start with http:// or https://`); return;
+      }
+    }
     setError(''); setProcessing(true);
     try {
       if (mode === 'edit') {
@@ -1053,6 +1134,85 @@ function AnnouncementModal({ mode, announcementId, announcements, session, onClo
           placeholder="Detailed description of what trainers need to do..."
           rows={5}
           style={{ width: '100%', padding: '10px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+      </div>
+
+      {/* D3a.1: Bullets */}
+      <div style={{ marginTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <FormLabel>Bullet points (optional)</FormLabel>
+          <button type="button" onClick={addBullet}
+            style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Plus size={11} /> Add bullet
+          </button>
+        </div>
+        {form.bullets.length === 0 ? (
+          <div style={{ fontSize: '11px', color: '#666', fontStyle: 'italic', padding: '8px 0' }}>
+            No bullet points. Add short reminders trainers should keep in mind.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {form.bullets.map((b, i) => (
+              <div key={b.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button type="button" onClick={() => moveBullet(i, -1)} disabled={i === 0}
+                    style={{ background: 'transparent', border: '1px solid #444', color: i === 0 ? '#444' : '#999', cursor: i === 0 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▲</button>
+                  <button type="button" onClick={() => moveBullet(i, 1)} disabled={i === form.bullets.length - 1}
+                    style={{ background: 'transparent', border: '1px solid #444', color: i === form.bullets.length - 1 ? '#444' : '#999', cursor: i === form.bullets.length - 1 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▼</button>
+                </div>
+                <input value={b.text} onChange={(e) => updateBulletText(i, e.target.value)}
+                  placeholder="Short reminder..."
+                  style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }} />
+                <button type="button" onClick={() => removeBullet(i)} title="Remove bullet"
+                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* D3a.1: Links */}
+      <div style={{ marginTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <FormLabel>Reference links (optional)</FormLabel>
+          <button type="button" onClick={addLink}
+            style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Plus size={11} /> Add link
+          </button>
+        </div>
+        {form.links.length === 0 ? (
+          <div style={{ fontSize: '11px', color: '#666', fontStyle: 'italic', padding: '8px 0' }}>
+            No links. Add references to ClickUp, Confluence, SharePoint, etc.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {form.links.map((l, i) => (
+              <div key={l.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 2fr auto', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button type="button" onClick={() => moveLink(i, -1)} disabled={i === 0}
+                    style={{ background: 'transparent', border: '1px solid #444', color: i === 0 ? '#444' : '#999', cursor: i === 0 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▲</button>
+                  <button type="button" onClick={() => moveLink(i, 1)} disabled={i === form.links.length - 1}
+                    style={{ background: 'transparent', border: '1px solid #444', color: i === form.links.length - 1 ? '#444' : '#999', cursor: i === form.links.length - 1 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▼</button>
+                </div>
+                <input value={l.label} onChange={(e) => updateLinkField(i, 'label', e.target.value)}
+                  placeholder="Label (optional)"
+                  style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+                <input value={l.url} onChange={(e) => updateLinkField(i, 'url', e.target.value)}
+                  placeholder="https://..."
+                  style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+                <button type="button" onClick={() => removeLink(i)} title="Remove link"
+                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ marginTop: '14px' }}>
