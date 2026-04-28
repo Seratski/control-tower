@@ -960,6 +960,90 @@ export async function deleteAnnouncement(announcementId) {
   await deleteDoc(doc(db, 'announcements', announcementId));
 }
 
+/**
+ * D3b: Add an admin (by displayName) to a market's assignees array.
+ * Idempotent — adding the same person twice is a no-op.
+ */
+export async function assignToAnnouncementMarket(announcementId, market, actorName) {
+  if (!actorName) throw new Error('Missing actor name');
+  const ref = doc(db, 'announcements', announcementId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Announcement not found');
+  const data = snap.data();
+  const states = data.marketStates || {};
+  const current = states[market];
+  if (!current) throw new Error(`Market ${market} is not part of this announcement`);
+  const assignees = current.assignees || [];
+  if (assignees.includes(actorName)) return; // already there
+  const newStates = {
+    ...states,
+    [market]: {
+      ...current,
+      assignees: [...assignees, actorName],
+      lastUpdated: new Date().toISOString(),
+      lastUpdatedBy: actorName,
+    },
+  };
+  await updateDoc(ref, { marketStates: newStates });
+}
+
+/**
+ * D3b: Remove a person (by displayName) from a market's assignees array.
+ * Anyone (admin) can remove anyone — keep it simple.
+ */
+export async function unassignFromAnnouncementMarket(announcementId, market, targetName, actorName) {
+  if (!targetName) throw new Error('Missing target name');
+  if (!actorName) throw new Error('Missing actor name');
+  const ref = doc(db, 'announcements', announcementId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Announcement not found');
+  const data = snap.data();
+  const states = data.marketStates || {};
+  const current = states[market];
+  if (!current) throw new Error(`Market ${market} is not part of this announcement`);
+  const assignees = (current.assignees || []).filter(n => n !== targetName);
+  const newStates = {
+    ...states,
+    [market]: {
+      ...current,
+      assignees,
+      lastUpdated: new Date().toISOString(),
+      lastUpdatedBy: actorName,
+    },
+  };
+  await updateDoc(ref, { marketStates: newStates });
+}
+
+/**
+ * D3b: Change a market's status. Free-form (any → any) per Martin's choice.
+ * Validation: preparing/executing/completed require at least one assignee.
+ */
+export async function setAnnouncementMarketStatus(announcementId, market, newStatus, actorName) {
+  if (!ANNOUNCEMENT_STATUSES.includes(newStatus)) throw new Error('Invalid status');
+  if (!actorName) throw new Error('Missing actor name');
+  const ref = doc(db, 'announcements', announcementId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Announcement not found');
+  const data = snap.data();
+  const states = data.marketStates || {};
+  const current = states[market];
+  if (!current) throw new Error(`Market ${market} is not part of this announcement`);
+  const assignees = current.assignees || [];
+  if (newStatus !== 'open' && assignees.length === 0) {
+    throw new Error(`Assign someone to ${market} before moving past 'open'`);
+  }
+  const newStates = {
+    ...states,
+    [market]: {
+      ...current,
+      status: newStatus,
+      lastUpdated: new Date().toISOString(),
+      lastUpdatedBy: actorName,
+    },
+  };
+  await updateDoc(ref, { marketStates: newStates });
+}
+
 // ============ TIME LOGS (C5) ============
 // Time logs live as subcollections on /courses/{id}/timeLogs and /upskills/{id}/timeLogs.
 // Same shape on both: { date, hours, note, createdBy, createdAt }.
