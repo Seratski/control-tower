@@ -5,7 +5,7 @@ import {
   Shield, Eye, Search, BarChart3, UserCheck, GraduationCap,
   Activity, LogOut, Lock, Trash2, UserPlus, Settings, User,
   Filter, Users2, Briefcase, CheckSquare, Square, UserCog,
-  Megaphone, MinusCircle, Unlink, BookOpen, Zap,
+  Megaphone, MinusCircle, Unlink, BookOpen, Zap, Bell,
 } from 'lucide-react';
 import { getSession, loginWithPin, logout, createUser } from './lib/auth.js';
 import {
@@ -23,6 +23,7 @@ import {
   subscribeUpskills, createUpskill, updateUpskill, deleteUpskill,
   addAgentsToUpskill, removeAgentFromUpskill, setUpskillStatus,
   subscribeTimeLogs, addTimeLog, deleteTimeLog,
+  subscribeAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -81,6 +82,16 @@ const courseStatusColor = (status) => {
     case 'In progress': return BRAND.orange;
     case 'Completed': return '#4ade80';
     case 'Cancelled': return '#666';
+    default: return '#666';
+  }
+};
+
+const announcementStatusColor = (status) => {
+  switch (status) {
+    case 'open': return '#666';
+    case 'preparing': return BRAND.yellow;
+    case 'executing': return BRAND.orange;
+    case 'completed': return '#4ade80';
     default: return '#666';
   }
 };
@@ -149,12 +160,14 @@ function Dashboard({ session, onLogout }) {
   const [courseTypes, setCourseTypes] = useState([]);
   const [courses, setCourses] = useState([]);
   const [upskills, setUpskills] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
   const [selectedRecruitment, setSelectedRecruitment] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedUpskill, setSelectedUpskill] = useState(null);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [modal, setModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -169,8 +182,13 @@ function Dashboard({ session, onLogout }) {
     const unsubCourseTypes = subscribeCourseTypes(setCourseTypes);
     const unsubCourses = subscribeCourses(setCourses);
     const unsubUpskills = subscribeUpskills(setUpskills);
+    const unsubAnnouncements = subscribeAnnouncements(setAnnouncements);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
-    return () => { unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers(); unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses(); unsubUpskills(); };
+    return () => {
+      unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers();
+      unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses();
+      unsubUpskills(); unsubAnnouncements();
+    };
   }, []);
 
   const skillStats = useMemo(() => {
@@ -248,13 +266,14 @@ function Dashboard({ session, onLogout }) {
             ...(isAdmin ? [{ id: 'recruitment', label: 'Recruitments', icon: Megaphone }] : []),
             ...(isAdmin ? [{ id: 'course', label: 'Courses', icon: BookOpen }] : []),
             ...(isAdmin ? [{ id: 'upskill', label: 'Upskills', icon: Zap }] : []),
+            ...(isAdmin ? [{ id: 'announcement', label: 'Announcements', icon: Bell }] : []),
             ...(isAdmin ? [{ id: 'controltower', label: 'Control Tower', icon: Activity }] : []),
             ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: Settings }] : []),
           ].map(tab => {
             const Icon = tab.icon;
             const active = view === tab.id;
             return (
-              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); setSelectedCourse(null); setSelectedUpskill(null); }}
+              <button key={tab.id} onClick={() => { setView(tab.id); setSelectedAgent(null); setSelectedSkill(null); setSelectedRecruitment(null); setSelectedCourse(null); setSelectedUpskill(null); setSelectedAnnouncement(null); }}
                 style={{ background: 'transparent', color: active ? BRAND.orange : '#999', border: 'none', borderBottom: `3px solid ${active ? BRAND.orange : 'transparent'}`, padding: '12px 14px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 <Icon size={15} /> {tab.label}
               </button>
@@ -407,6 +426,25 @@ function Dashboard({ session, onLogout }) {
               setSelectedAgent(agentId);
             }} />
         )}
+        {view === 'announcement' && isAdmin && !selectedAnnouncement && (
+          <AnnouncementListView announcements={announcements} trainers={trainers}
+            setSelectedAnnouncement={setSelectedAnnouncement}
+            onNewAnnouncement={() => setModal({ type: 'newAnnouncement' })} />
+        )}
+        {view === 'announcement' && isAdmin && selectedAnnouncement && (
+          <AnnouncementDetailView announcementId={selectedAnnouncement} announcements={announcements}
+            trainers={trainers} session={session}
+            onBack={() => setSelectedAnnouncement(null)}
+            onEdit={() => setModal({ type: 'editAnnouncement', announcementId: selectedAnnouncement })}
+            onDelete={async () => {
+              const a = announcements.find(x => x.id === selectedAnnouncement);
+              if (!a) return;
+              if (confirm(`Delete announcement "${a.title}"?\n\nThis cannot be undone.`)) {
+                await deleteAnnouncement(selectedAnnouncement);
+                setSelectedAnnouncement(null);
+              }
+            }} />
+        )}
         {view === 'controltower' && isAdmin && (
           <ControlTowerView trainers={trainers} courses={courses} upskills={upskills}
             skills={skills} agents={agents}
@@ -461,6 +499,13 @@ function Dashboard({ session, onLogout }) {
           trainers={trainers} session={session}
           onClose={() => setModal(null)} />
       )}
+      {modal?.type === 'newAnnouncement' && (
+        <AnnouncementModal mode="new" session={session} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'editAnnouncement' && (
+        <AnnouncementModal mode="edit" announcementId={modal.announcementId}
+          announcements={announcements} session={session} onClose={() => setModal(null)} />
+      )}
       {modal?.type === 'newRecruitment' && <NewRecruitmentModal recruiters={recruiters} trainers={trainers} onClose={() => setModal(null)} />}
       {modal?.type === 'convertCandidate' && (
         <ConvertCandidateModal slot={modal.slot} recruitmentId={modal.recruitmentId}
@@ -482,7 +527,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.2 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.3 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -726,6 +771,320 @@ function RevertSlotModal({ slot, recruitmentId, recruitments, agents, session, o
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} disabled={processing}
           style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ============ ANNOUNCEMENTS (D3a) ============
+
+function AnnouncementListView({ announcements, trainers, setSelectedAnnouncement, onNewAnnouncement }) {
+  const [marketFilter, setMarketFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ACTIVE'); // active = anything not fully completed in all markets
+
+  const filtered = useMemo(() => {
+    return announcements.filter(a => {
+      if (marketFilter !== 'ALL' && !(a.markets || []).includes(marketFilter)) return false;
+      if (statusFilter !== 'ALL') {
+        const states = Object.values(a.marketStates || {});
+        if (statusFilter === 'ACTIVE') {
+          if (states.length > 0 && states.every(s => s.status === 'completed')) return false;
+        } else if (statusFilter === 'COMPLETED') {
+          if (states.length === 0 || states.some(s => s.status !== 'completed')) return false;
+        } else {
+          // specific status: at least one market matches
+          if (!states.some(s => s.status === statusFilter)) return false;
+        }
+      }
+      return true;
+    });
+  }, [announcements, marketFilter, statusFilter]);
+
+  const hasFilters = marketFilter !== 'ALL' || statusFilter !== 'ACTIVE';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            Announcements · {announcements.length} total
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '8px 0 0', lineHeight: 1 }}>
+            Trainer <span style={{ color: BRAND.orange }}>announcements</span>
+          </h2>
+          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px', maxWidth: '640px' }}>
+            Tasks Learning posts to trainers — briefings, system updates, routine changes. Each market progresses independently.
+          </div>
+        </div>
+        <button onClick={onNewAnnouncement} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Plus size={14} /> New announcement
+        </button>
+      </div>
+
+      <div style={{ background: BRAND.grey, padding: '16px', border: `1px solid #333`, marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <FilterLabel>Market</FilterLabel>
+          <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ALL">All</option><option value="DK">DK</option><option value="NO">NO</option><option value="SE">SE</option><option value="FI">FI</option>
+          </select>
+        </div>
+        <div>
+          <FilterLabel>Status</FilterLabel>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterSelectStyle}>
+            <option value="ACTIVE">Active (not fully done)</option>
+            <option value="open">Has open</option>
+            <option value="preparing">Has preparing</option>
+            <option value="executing">Has executing</option>
+            <option value="COMPLETED">All markets completed</option>
+            <option value="ALL">All</option>
+          </select>
+        </div>
+        {hasFilters && (
+          <button onClick={() => { setMarketFilter('ALL'); setStatusFilter('ACTIVE'); }}
+            style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '8px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px', height: '34px' }}>
+            <X size={12} /> Clear
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: '16px' }}>
+        {filtered.map(a => {
+          const states = a.marketStates || {};
+          const marketsList = a.markets || [];
+          const completed = marketsList.filter(m => states[m]?.status === 'completed').length;
+          const total = marketsList.length;
+          const allDone = total > 0 && completed === total;
+
+          return (
+            <div key={a.id} onClick={() => setSelectedAnnouncement(a.id)} className="hover-lift"
+              style={{ background: BRAND.grey, border: `1px solid #333`, borderTop: `3px solid ${allDone ? '#4ade80' : BRAND.orange}`, padding: '20px', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '10px' }}>
+                <Bell size={16} color={BRAND.orange} style={{ flexShrink: 0, marginTop: '4px' }} />
+                <h3 className="display-font" style={{ margin: 0, fontSize: '18px', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</h3>
+              </div>
+
+              {a.description && (
+                <div style={{ fontSize: '12px', color: '#bbb', marginBottom: '12px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {a.description}
+                </div>
+              )}
+
+              {/* Per-market status chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                {marketsList.map(m => {
+                  const st = states[m]?.status || 'open';
+                  const assignees = states[m]?.assignees || [];
+                  return (
+                    <div key={m} style={{ background: BRAND.black, border: `1px solid ${announcementStatusColor(st)}`, borderLeft: `3px solid ${announcementStatusColor(st)}`, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: BRAND.white }}>{m}</span>
+                      <span style={{ fontSize: '9px', color: announcementStatusColor(st), textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>{st}</span>
+                      {assignees.length > 0 && (
+                        <span style={{ fontSize: '9px', color: '#999' }}>· {assignees.length}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ paddingTop: '10px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#999' }}>
+                <span>By {a.createdBy}</span>
+                <span>
+                  <strong style={{ color: allDone ? '#4ade80' : BRAND.orange }}>{completed}/{total}</strong> markets done
+                </span>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.grey, border: `1px solid #333` }}>
+            {announcements.length === 0 ? 'No announcements yet — click "New announcement" to post your first.' : 'No announcements match filters.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AnnouncementDetailView({ announcementId, announcements, trainers, session, onBack, onEdit, onDelete }) {
+  const announcement = announcements.find(a => a.id === announcementId);
+  if (!announcement) return null;
+
+  const states = announcement.marketStates || {};
+  const marketsList = announcement.markets || [];
+  const completed = marketsList.filter(m => states[m]?.status === 'completed').length;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={onEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Edit3 size={12} /> Edit
+          </button>
+          <button onClick={onDelete} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        <div style={{ width: '80px', height: '80px', background: BRAND.orange, color: BRAND.black, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="display-font">
+          <Bell size={36} />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '11px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700 }}>
+            Announcement · {marketsList.join(' · ')}
+          </div>
+          <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{announcement.title}</h2>
+          <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
+            By {announcement.createdBy} · <strong style={{ color: BRAND.orange }}>{completed}/{marketsList.length}</strong> markets completed
+          </div>
+        </div>
+      </div>
+
+      {announcement.description && (
+        <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.orange}`, marginBottom: '24px' }}>
+          <div style={{ fontSize: '10px', color: BRAND.orange, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '6px' }}>Description</div>
+          <div style={{ fontSize: '13px', color: '#ddd', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{announcement.description}</div>
+        </div>
+      )}
+
+      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
+        <strong style={{ color: BRAND.yellow }}>Read-only for now.</strong> Self-assign and per-market status changes are coming in the next iteration. Below shows what each market state will look like.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+        {marketsList.map(m => {
+          const st = states[m] || { status: 'open', assignees: [] };
+          const assigneeNames = (st.assignees || []).map(id => trainers.find(t => t.id === id)?.name).filter(Boolean);
+          return (
+            <div key={m} style={{ background: BRAND.grey, border: `1px solid #333`, borderLeft: `3px solid ${announcementStatusColor(st.status)}`, padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div className="display-font" style={{ fontSize: '20px' }}>{m}</div>
+                <span style={{ fontSize: '10px', padding: '3px 8px', background: announcementStatusColor(st.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                  {st.status}
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: '#999', marginBottom: '6px' }}>
+                {assigneeNames.length === 0 ? <em>No trainers assigned yet</em> : `${assigneeNames.length} trainer${assigneeNames.length === 1 ? '' : 's'} on this`}
+              </div>
+              {assigneeNames.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {assigneeNames.map((name, i) => (
+                    <span key={i} style={{ fontSize: '10px', padding: '2px 6px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700 }}>{name}</span>
+                  ))}
+                </div>
+              )}
+              {st.lastUpdated && (
+                <div style={{ fontSize: '10px', color: '#666', marginTop: '8px' }}>
+                  Last updated by {st.lastUpdatedBy || 'Unknown'}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AnnouncementModal({ mode, announcementId, announcements, session, onClose }) {
+  const existing = mode === 'edit' && announcementId
+    ? announcements.find(a => a.id === announcementId)
+    : null;
+  const [form, setForm] = useState({
+    title: existing?.title || '',
+    description: existing?.description || '',
+    markets: existing?.markets || [],
+  });
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  const toggleMarket = (m) => {
+    const has = form.markets.includes(m);
+    setForm({ ...form, markets: has ? form.markets.filter(x => x !== m) : [...form.markets, m] });
+  };
+
+  const save = async () => {
+    if (!form.title.trim()) { setError('Title is required'); return; }
+    if (form.markets.length === 0) { setError('Pick at least one market'); return; }
+    setError(''); setProcessing(true);
+    try {
+      if (mode === 'edit') {
+        await updateAnnouncement(announcementId, form);
+      } else {
+        await createAnnouncement({ ...form, actorName: session.displayName });
+      }
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to save');
+      setProcessing(false);
+    }
+  };
+
+  // For edit mode: detect markets being removed (with active state) to warn
+  const removedMarkets = mode === 'edit' && existing
+    ? (existing.markets || []).filter(m => !form.markets.includes(m))
+    : [];
+  const removedActive = removedMarkets.filter(m => {
+    const st = existing.marketStates?.[m];
+    return st && st.status !== 'open';
+  });
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>
+        {mode === 'edit' ? 'Edit announcement' : 'New announcement'}
+      </h3>
+      <div style={{ marginTop: '6px', color: '#bbb', fontSize: '12px' }}>
+        {mode === 'edit'
+          ? 'Update the title, description, or markets. Per-market progress is preserved for kept markets.'
+          : 'Post a task to trainers. Each market will track progress independently.'}
+      </div>
+
+      <div style={{ marginTop: '20px' }}>
+        <FormField label="Title *" required value={form.title} onChange={(v) => setForm({ ...form, title: v })}
+          placeholder="e.g. Friday morning briefing — system update" />
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <FormLabel>Description</FormLabel>
+        <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Detailed description of what trainers need to do..."
+          rows={5}
+          style={{ width: '100%', padding: '10px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }} />
+      </div>
+
+      <div style={{ marginTop: '14px' }}>
+        <FormLabel>Relevant markets *</FormLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {['DK', 'NO', 'SE', 'FI'].map(m => {
+            const isChecked = form.markets.includes(m);
+            return (
+              <button key={m} type="button" onClick={() => toggleMarket(m)}
+                style={{ background: isChecked ? BRAND.orange : 'transparent', color: isChecked ? BRAND.black : BRAND.white, border: `1px solid ${isChecked ? BRAND.orange : '#555'}`, padding: '8px 16px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, minWidth: '60px' }}>
+                {m}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {removedActive.length > 0 && (
+        <div style={{ marginTop: '14px', padding: '10px 14px', background: BRAND.black, borderLeft: `3px solid ${BRAND.yellow}`, fontSize: '11px', color: '#bbb', lineHeight: 1.5 }}>
+          <strong style={{ color: BRAND.yellow }}>Heads up:</strong> Removing market(s) <strong>{removedActive.join(', ')}</strong> will delete their progress (status, assignees). This cannot be undone.
+        </div>
+      )}
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '8px 12px', fontSize: '12px', marginTop: '14px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>Cancel</button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Saving...' : (mode === 'edit' ? 'Save changes' : 'Create announcement')}
+        </button>
       </div>
     </ModalShell>
   );
