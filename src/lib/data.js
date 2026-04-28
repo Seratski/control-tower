@@ -855,6 +855,85 @@ export async function bulkAssignTrainer(agentIds, newTrainerId, newTrainerName, 
   }
 }
 
+// ============ ANNOUNCEMENTS (D3) ============
+// Announcements are tasks Learning posts to trainers (e.g. "Attend Friday morning briefing").
+// Each announcement is relevant for one or more markets, and each market has an
+// independent status that trainers self-progress: open → preparing → executing → completed.
+
+const ANNOUNCEMENT_STATUSES = ['open', 'preparing', 'executing', 'completed'];
+
+export function subscribeAnnouncements(callback) {
+  const q = query(collection(db, 'announcements'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+}
+
+export async function createAnnouncement({ title, description, markets, actorName }) {
+  if (!title || !title.trim()) throw new Error('Title is required');
+  if (!markets || markets.length === 0) throw new Error('Pick at least one market');
+
+  const cleanId = 'an_' + title.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const finalId = cleanId + '_' + Date.now().toString().slice(-4);
+
+  // Initialize one state entry per relevant market
+  const marketStates = {};
+  for (const m of markets) {
+    marketStates[m] = {
+      status: 'open',
+      assignees: [],
+      lastUpdated: null,
+      lastUpdatedBy: null,
+    };
+  }
+
+  await setDoc(doc(db, 'announcements', finalId), {
+    title: title.trim(),
+    description: (description || '').trim(),
+    markets,
+    marketStates,
+    createdBy: actorName || 'Unknown',
+    createdAt: serverTimestamp(),
+  });
+  return finalId;
+}
+
+export async function updateAnnouncement(announcementId, updates) {
+  // Only title, description, and markets are editable here. marketStates is
+  // managed via the per-market handlers below to keep the state machine clean.
+  const ref = doc(db, 'announcements', announcementId);
+  const cleanUpdates = {};
+  if (updates.title !== undefined) {
+    if (!updates.title.trim()) throw new Error('Title cannot be empty');
+    cleanUpdates.title = updates.title.trim();
+  }
+  if (updates.description !== undefined) {
+    cleanUpdates.description = (updates.description || '').trim();
+  }
+  if (updates.markets !== undefined) {
+    if (updates.markets.length === 0) throw new Error('Pick at least one market');
+    // Reconcile marketStates: keep state for markets that still apply,
+    // add fresh 'open' state for newly added markets, drop removed ones.
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Announcement not found');
+    const existing = snap.data().marketStates || {};
+    const newStates = {};
+    for (const m of updates.markets) {
+      newStates[m] = existing[m] || {
+        status: 'open',
+        assignees: [],
+        lastUpdated: null,
+        lastUpdatedBy: null,
+      };
+    }
+    cleanUpdates.markets = updates.markets;
+    cleanUpdates.marketStates = newStates;
+  }
+  await updateDoc(ref, cleanUpdates);
+}
+
+export async function deleteAnnouncement(announcementId) {
+  await deleteDoc(doc(db, 'announcements', announcementId));
+}
+
 // ============ TIME LOGS (C5) ============
 // Time logs live as subcollections on /courses/{id}/timeLogs and /upskills/{id}/timeLogs.
 // Same shape on both: { date, hours, note, createdBy, createdAt }.
