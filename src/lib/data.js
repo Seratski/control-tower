@@ -710,6 +710,47 @@ export async function changeAgentTrainer(agentId, newTrainerId, newTrainerName, 
 /**
  * UPDATED IN ROUND 3b-1: deleteAgent now auto-frees the recruitment slot
  */
+/**
+ * D1: Terminate an agent. Keeps the agent in the database with status='Terminated'
+ * and a terminatedDate. Skills and history are preserved. Reversible.
+ */
+export async function terminateAgent(agentId, terminationDate, actorName) {
+  if (!terminationDate) throw new Error('Termination date is required');
+  await updateDoc(doc(db, 'agents', agentId), {
+    status: 'Terminated',
+    terminatedDate: terminationDate,
+  });
+  await addTimelineEvent(agentId, {
+    type: 'comment',
+    title: 'Agent terminated',
+    note: `Effective ${terminationDate}. ClickUp termination form was submitted.`,
+    createdBy: actorName,
+  });
+}
+
+/**
+ * D1: Reactivate a previously terminated agent. Sets status back to 'Active'
+ * and clears terminatedDate. Useful if termination was a mistake.
+ */
+export async function reactivateAgent(agentId, actorName) {
+  await updateDoc(doc(db, 'agents', agentId), {
+    status: 'Active',
+    terminatedDate: null,
+  });
+  await addTimelineEvent(agentId, {
+    type: 'comment',
+    title: 'Agent reactivated',
+    note: 'Termination reversed.',
+    createdBy: actorName,
+  });
+}
+
+/**
+ * UPDATED IN D1: deleteAgent is now restricted to "fresh" agents (no skills,
+ * not enrolled in any course, not assigned to upskills, not linked to a
+ * recruitment slot, only the auto-created timeline event). Caller (UI) is
+ * responsible for showing/hiding the option — but we double-check here too.
+ */
 export async function deleteAgent(agentId) {
   // If agent is linked to a recruitment, free the slot first
   try {
