@@ -867,7 +867,7 @@ export function subscribeAnnouncements(callback) {
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
-export async function createAnnouncement({ title, description, markets, actorName }) {
+export async function createAnnouncement({ title, description, bullets, links, markets, actorName }) {
   if (!title || !title.trim()) throw new Error('Title is required');
   if (!markets || markets.length === 0) throw new Error('Pick at least one market');
 
@@ -888,6 +888,8 @@ export async function createAnnouncement({ title, description, markets, actorNam
   await setDoc(doc(db, 'announcements', finalId), {
     title: title.trim(),
     description: (description || '').trim(),
+    bullets: sanitizeBullets(bullets),
+    links: sanitizeLinks(links),
     markets,
     marketStates,
     createdBy: actorName || 'Unknown',
@@ -896,9 +898,27 @@ export async function createAnnouncement({ title, description, markets, actorNam
   return finalId;
 }
 
+function sanitizeBullets(bullets) {
+  if (!Array.isArray(bullets)) return [];
+  return bullets
+    .map((b, i) => ({ id: b.id || `b_${Date.now()}_${i}`, text: (b.text || '').trim() }))
+    .filter(b => b.text.length > 0);
+}
+
+function sanitizeLinks(links) {
+  if (!Array.isArray(links)) return [];
+  return links
+    .map((l, i) => ({
+      id: l.id || `l_${Date.now()}_${i}`,
+      label: (l.label || '').trim(),
+      url: (l.url || '').trim(),
+    }))
+    .filter(l => l.url.length > 0);
+}
+
 export async function updateAnnouncement(announcementId, updates) {
-  // Only title, description, and markets are editable here. marketStates is
-  // managed via the per-market handlers below to keep the state machine clean.
+  // Only title, description, bullets, links, and markets are editable here.
+  // marketStates is managed via the per-market handlers (D3b) to keep the state machine clean.
   const ref = doc(db, 'announcements', announcementId);
   const cleanUpdates = {};
   if (updates.title !== undefined) {
@@ -907,6 +927,12 @@ export async function updateAnnouncement(announcementId, updates) {
   }
   if (updates.description !== undefined) {
     cleanUpdates.description = (updates.description || '').trim();
+  }
+  if (updates.bullets !== undefined) {
+    cleanUpdates.bullets = sanitizeBullets(updates.bullets);
+  }
+  if (updates.links !== undefined) {
+    cleanUpdates.links = sanitizeLinks(updates.links);
   }
   if (updates.markets !== undefined) {
     if (updates.markets.length === 0) throw new Error('Pick at least one market');
