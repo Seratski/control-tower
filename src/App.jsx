@@ -331,7 +331,6 @@ function Dashboard({ session, onLogout }) {
               }
             }} />
         )}
-        )}
         {view === 'skill' && !selectedSkill && (
           <SkillListView skillStats={skillStats} setSelectedSkill={setSelectedSkill} isAdmin={isAdmin} onManageSkills={() => setModal({ type: 'manageSkills' })} />
         )}
@@ -528,7 +527,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.5 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.5.1 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
