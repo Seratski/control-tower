@@ -24,6 +24,7 @@ import {
   addAgentsToUpskill, removeAgentFromUpskill, setUpskillStatus,
   subscribeTimeLogs, addTimeLog, deleteTimeLog,
   subscribeAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
+  assignToAnnouncementMarket, unassignFromAnnouncementMarket, setAnnouncementMarketStatus,
   createRecruitment, updateRecruitment, deleteRecruitment,
   convertCandidateToAgent,
   addCandidateSlots, removeCandidateSlot,
@@ -527,7 +528,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.4 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.5 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -986,41 +987,124 @@ function AnnouncementDetailView({ announcementId, announcements, trainers, sessi
         </div>
       )}
 
-      <div style={{ background: BRAND.grey, padding: '16px 20px', border: `1px solid #333`, borderLeft: `3px solid ${BRAND.yellow}`, marginBottom: '24px', fontSize: '12px', color: '#bbb', lineHeight: 1.5 }}>
-        <strong style={{ color: BRAND.yellow }}>Read-only for now.</strong> Self-assign and per-market status changes are coming in the next iteration. Below shows what each market state will look like.
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+        {marketsList.map(m => (
+          <AnnouncementMarketCard key={m} announcementId={announcementId} market={m}
+            state={states[m] || { status: 'open', assignees: [] }}
+            session={session} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * D3b: A single interactive market card for an announcement.
+ * The current admin can:
+ *   - Assign themselves (if not already on this market)
+ *   - Unassign themselves or anyone else
+ *   - Change the status (open/preparing/executing/completed)
+ * Status changes past 'open' require at least one assignee.
+ */
+function AnnouncementMarketCard({ announcementId, market, state, session }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const me = session.displayName;
+  const assignees = state.assignees || [];
+  const isOnThis = assignees.includes(me);
+
+  const guard = async (fn) => {
+    setBusy(true); setError('');
+    try { await fn(); }
+    catch (err) { setError(err.message || 'Action failed'); }
+    finally { setBusy(false); }
+  };
+
+  const handleAssignMe = () => guard(() => assignToAnnouncementMarket(announcementId, market, me));
+  const handleUnassign = (name) => guard(() => unassignFromAnnouncementMarket(announcementId, market, name, me));
+  const handleStatusChange = (newStatus) => {
+    if (newStatus === state.status) return;
+    guard(() => setAnnouncementMarketStatus(announcementId, market, newStatus, me));
+  };
+
+  return (
+    <div style={{ background: BRAND.grey, border: `1px solid #333`, borderLeft: `3px solid ${announcementStatusColor(state.status)}`, padding: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '12px' }}>
+        <div className="display-font" style={{ fontSize: '20px' }}>{market}</div>
+        <span style={{ fontSize: '10px', padding: '3px 8px', background: announcementStatusColor(state.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+          {state.status}
+        </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-        {marketsList.map(m => {
-          const st = states[m] || { status: 'open', assignees: [] };
-          const assigneeNames = (st.assignees || []).map(id => trainers.find(t => t.id === id)?.name).filter(Boolean);
+      {/* Status switcher */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', flexWrap: 'wrap' }}>
+        {['open', 'preparing', 'executing', 'completed'].map(s => {
+          const isActive = state.status === s;
+          const color = announcementStatusColor(s);
           return (
-            <div key={m} style={{ background: BRAND.grey, border: `1px solid #333`, borderLeft: `3px solid ${announcementStatusColor(st.status)}`, padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <div className="display-font" style={{ fontSize: '20px' }}>{m}</div>
-                <span style={{ fontSize: '10px', padding: '3px 8px', background: announcementStatusColor(st.status), color: BRAND.black, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                  {st.status}
-                </span>
-              </div>
-              <div style={{ fontSize: '11px', color: '#999', marginBottom: '6px' }}>
-                {assigneeNames.length === 0 ? <em>No trainers assigned yet</em> : `${assigneeNames.length} trainer${assigneeNames.length === 1 ? '' : 's'} on this`}
-              </div>
-              {assigneeNames.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  {assigneeNames.map((name, i) => (
-                    <span key={i} style={{ fontSize: '10px', padding: '2px 6px', background: BRAND.black, color: BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700 }}>{name}</span>
-                  ))}
-                </div>
-              )}
-              {st.lastUpdated && (
-                <div style={{ fontSize: '10px', color: '#666', marginTop: '8px' }}>
-                  Last updated by {st.lastUpdatedBy || 'Unknown'}
-                </div>
-              )}
-            </div>
+            <button key={s} onClick={() => handleStatusChange(s)} disabled={busy || isActive}
+              title={isActive ? 'Current status' : `Change to ${s}`}
+              style={{
+                background: isActive ? color : 'transparent',
+                color: isActive ? BRAND.black : color,
+                border: `1px solid ${color}`,
+                padding: '4px 8px',
+                cursor: (busy || isActive) ? 'default' : 'pointer',
+                fontSize: '10px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                opacity: busy ? 0.5 : 1,
+                flex: '1 1 auto',
+                minWidth: '0',
+              }}>
+              {s}
+            </button>
           );
         })}
       </div>
+
+      {error && (
+        <div style={{ background: BRAND.red, color: BRAND.white, padding: '6px 10px', fontSize: '11px', marginBottom: '10px' }}>
+          {error}
+        </div>
+      )}
+
+      {/* Assignees list */}
+      <div style={{ fontSize: '11px', color: '#999', marginBottom: '6px' }}>
+        {assignees.length === 0 ? <em>No one assigned yet</em> : `${assignees.length} on this`}
+      </div>
+      {assignees.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+          {assignees.map(name => {
+            const isMe = name === me;
+            return (
+              <span key={name}
+                style={{ fontSize: '10px', padding: '3px 6px', background: isMe ? BRAND.orange : BRAND.black, color: isMe ? BRAND.black : BRAND.orange, border: `1px solid ${BRAND.orange}`, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                {name}{isMe && ' (you)'}
+                <button onClick={() => handleUnassign(name)} disabled={busy}
+                  title={`Remove ${name}`}
+                  style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: busy ? 'wait' : 'pointer', padding: 0, display: 'inline-flex' }}>
+                  <X size={9} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {!isOnThis && (
+        <button onClick={handleAssignMe} disabled={busy}
+          style={{ background: 'transparent', color: BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '4px 10px', cursor: busy ? 'wait' : 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: assignees.length > 0 ? '0' : '4px' }}>
+          + Assign me
+        </button>
+      )}
+
+      {state.lastUpdated && (
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '10px', borderTop: `1px solid #333`, paddingTop: '6px' }}>
+          Last updated by {state.lastUpdatedBy || 'Unknown'}
+        </div>
+      )}
     </div>
   );
 }
