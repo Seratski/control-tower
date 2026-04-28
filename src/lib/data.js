@@ -135,11 +135,12 @@ export function subscribeCourses(callback) {
   const q = query(collection(db, 'courses'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-export async function createCourse({ name, courseTypeId, market, trainerId, startDate, endDate, skillIds, recruitmentId }) {
+export async function createCourse({ name, description, courseTypeId, market, trainerId, startDate, endDate, skillIds, recruitmentId }) {
   const cleanId = 'co_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'courses', finalId), {
     name: name.trim(),
+    description: (description || '').trim().slice(0, 250),
     courseTypeId: courseTypeId || null,
     market,
     trainerId: trainerId || null,
@@ -156,6 +157,7 @@ export async function createCourse({ name, courseTypeId, market, trainerId, star
 export async function updateCourse(courseId, updates) {
   const cleanUpdates = {};
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
+  if (updates.description !== undefined) cleanUpdates.description = (updates.description || '').trim().slice(0, 250);
   if (updates.courseTypeId !== undefined) cleanUpdates.courseTypeId = updates.courseTypeId || null;
   if (updates.market !== undefined) cleanUpdates.market = updates.market;
   if (updates.trainerId !== undefined) cleanUpdates.trainerId = updates.trainerId || null;
@@ -871,11 +873,12 @@ export function subscribeTimeLogs(parentType, parentId, callback) {
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
-export async function addTimeLog(parentType, parentId, { date, hours, note, createdBy }) {
+export async function addTimeLog(parentType, parentId, { date, hours, note, trainerId, createdBy }) {
   const hoursNum = parseFloat(hours);
   if (!hoursNum || hoursNum <= 0) throw new Error('Hours must be a positive number');
   if (hoursNum > 24) throw new Error('A single log cannot exceed 24 hours');
   if (!date) throw new Error('Date is required');
+  if (!trainerId) throw new Error('Trainer is required');
   // Block future dates
   const today = new Date().toISOString().split('T')[0];
   if (date > today) throw new Error('Cannot log time for future dates');
@@ -884,6 +887,7 @@ export async function addTimeLog(parentType, parentId, { date, hours, note, crea
     date,
     hours: hoursNum,
     note: (note || '').trim(),
+    trainerId,
     createdBy: createdBy || 'Unknown',
     createdAt: serverTimestamp(),
   });
