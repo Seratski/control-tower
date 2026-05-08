@@ -553,7 +553,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.6 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.7 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -5301,6 +5301,7 @@ function ManageCourseTypesModal({ courseTypes, skills, onClose }) {
   const [showNew, setShowNew] = useState(false);
   const [newForm, setNewForm] = useState({ name: '', description: '', defaultSkillIds: [] });
   const [error, setError] = useState('');
+  const [planEditingId, setPlanEditingId] = useState(null); // F1: which course-type's plan is being edited
 
   const startEdit = (ct) => {
     setEditingId(ct.id);
@@ -5432,6 +5433,10 @@ function ManageCourseTypesModal({ courseTypes, skills, onClose }) {
                     </div>
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => setPlanEditingId(ct.id)} title="Edit course plan"
+                      style={{ background: 'transparent', border: `1px solid ${BRAND.yellow}`, color: BRAND.yellow, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>
+                      Plan{(ct.plan?.days?.length || 0) > 0 && <> ({ct.plan.days.length}d)</>}
+                    </button>
                     <button onClick={() => startEdit(ct)} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, marginRight: '4px' }}>Edit</button>
                     <button onClick={() => handleDelete(ct)} style={{ background: 'transparent', border: `1px solid ${BRAND.red}`, color: BRAND.red, padding: '4px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>Delete</button>
                   </td>
@@ -5444,6 +5449,488 @@ function ManageCourseTypesModal({ courseTypes, skills, onClose }) {
       </div>
       <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>Done</button>
+      </div>
+
+      {planEditingId && (
+        <CoursePlanEditorModal
+          courseType={courseTypes.find(ct => ct.id === planEditingId)}
+          onClose={() => setPlanEditingId(null)} />
+      )}
+    </ModalShell>
+  );
+}
+
+// ============ COURSE PLAN EDITOR (F1) ============
+
+const COURSE_PLAN_FIELDS = [
+  { key: 'placeToBe',            label: 'Place to be',            simple: true,  width: 130 },
+  { key: 'training',             label: 'Training',               simple: false, width: 110 },
+  { key: 'academyCourseNo',      label: 'Academy No.',            simple: false, width: 100 },
+  { key: 'academyCourseName',    label: 'Academy course',         simple: false, width: 160 },
+  { key: 'academyMaterial',      label: 'Academy material',       simple: false, width: 130 },
+  { key: 'academyInclQuiz',      label: 'Quiz incl.',             simple: false, width: 90 },
+  { key: 'pptTrainingMaterial',  label: 'PPT material',           simple: false, width: 130 },
+  { key: 'pptMaterialCondition', label: 'PPT condition',          simple: false, width: 130 },
+  { key: 'task',                 label: 'Task / Subject',         simple: true,  width: 200 },
+  { key: 'description',          label: 'Description',            simple: true,  width: 260 },
+  { key: 'duration',             label: 'Duration (min)',         simple: true,  width: 100 },
+  { key: 'responsible',          label: 'Responsible',            simple: true,  width: 130 },
+  { key: 'performs',             label: 'Performs (title)',       simple: false, width: 130 },
+  { key: 'status',               label: 'Status',                 simple: false, width: 100 },
+  { key: 'moduleText',           label: 'Module text',            simple: false, width: 130 },
+  { key: 'moduleVideo',          label: 'Module video',           simple: false, width: 130 },
+  { key: 'cert',                 label: 'Cert.',                  simple: false, width: 90  },
+];
+const PLAN_SIMPLE_KEYS = COURSE_PLAN_FIELDS.filter(f => f.simple).map(f => f.key);
+const PLAN_VIEW_LS_KEY = 'ct_plan_visible_cols_v1';
+
+function loadPlanVisibleCols() {
+  try {
+    const raw = localStorage.getItem(PLAN_VIEW_LS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  // default: simple view
+  return PLAN_SIMPLE_KEYS;
+}
+function savePlanVisibleCols(cols) {
+  try { localStorage.setItem(PLAN_VIEW_LS_KEY, JSON.stringify(cols)); } catch { /* ignore */ }
+}
+
+function newDay(dayNumber) {
+  return {
+    id: `day_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    dayNumber,
+    title: '',
+    sections: [],
+  };
+}
+function newSection() {
+  return {
+    id: `sec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: '',
+    modules: [],
+  };
+}
+function newModule() {
+  return {
+    id: `mod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    placeToBe: '', training: '', academyCourseNo: '', academyCourseName: '',
+    academyMaterial: '', academyInclQuiz: '', pptTrainingMaterial: '', pptMaterialCondition: '',
+    task: '', description: '', duration: '', responsible: '', performs: '', status: '',
+    moduleText: '', moduleVideo: '', cert: '', links: [],
+  };
+}
+
+function CoursePlanEditorModal({ courseType, onClose }) {
+  // Initialise form state from existing plan, or empty
+  const [days, setDays] = useState(() => {
+    const existing = courseType?.plan?.days;
+    if (Array.isArray(existing) && existing.length > 0) {
+      // Deep clone so we can edit freely without mutating Firestore data
+      return JSON.parse(JSON.stringify(existing));
+    }
+    return [];
+  });
+  const [visibleCols, setVisibleCols] = useState(() => loadPlanVisibleCols());
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [editingLinksFor, setEditingLinksFor] = useState(null); // { dayId, sectionId, moduleId }
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!courseType) return null;
+
+  const updateVisibleCols = (cols) => {
+    setVisibleCols(cols);
+    savePlanVisibleCols(cols);
+  };
+  const toggleCol = (key) => {
+    if (visibleCols.includes(key)) updateVisibleCols(visibleCols.filter(c => c !== key));
+    else updateVisibleCols([...visibleCols, key]);
+  };
+  const setSimpleView = () => updateVisibleCols(PLAN_SIMPLE_KEYS);
+  const setFullView = () => updateVisibleCols(COURSE_PLAN_FIELDS.map(f => f.key));
+
+  // Compute next day number
+  const nextDayNumber = days.length === 0 ? 0 : Math.max(...days.map(d => d.dayNumber)) + 1;
+
+  // Day-level handlers
+  const addDay = () => setDays([...days, newDay(nextDayNumber)]);
+  const removeDay = (id) => {
+    if (!confirm('Remove this entire day with all its sections and modules?')) return;
+    setDays(days.filter(d => d.id !== id));
+  };
+  const moveDay = (id, dir) => {
+    const idx = days.findIndex(d => d.id === id);
+    if (idx < 0) return;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= days.length) return;
+    const next = [...days];
+    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+    setDays(next);
+  };
+  const updateDay = (id, patch) => {
+    setDays(days.map(d => d.id === id ? { ...d, ...patch } : d));
+  };
+
+  // Section-level handlers
+  const addSection = (dayId) => {
+    setDays(days.map(d => d.id === dayId ? { ...d, sections: [...d.sections, newSection()] } : d));
+  };
+  const removeSection = (dayId, sectionId) => {
+    if (!confirm('Remove this section with all its modules?')) return;
+    setDays(days.map(d => d.id === dayId
+      ? { ...d, sections: d.sections.filter(s => s.id !== sectionId) }
+      : d));
+  };
+  const moveSection = (dayId, sectionId, dir) => {
+    setDays(days.map(d => {
+      if (d.id !== dayId) return d;
+      const idx = d.sections.findIndex(s => s.id === sectionId);
+      if (idx < 0) return d;
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= d.sections.length) return d;
+      const sections = [...d.sections];
+      [sections[idx], sections[newIdx]] = [sections[newIdx], sections[idx]];
+      return { ...d, sections };
+    }));
+  };
+  const updateSection = (dayId, sectionId, patch) => {
+    setDays(days.map(d => d.id === dayId
+      ? { ...d, sections: d.sections.map(s => s.id === sectionId ? { ...s, ...patch } : s) }
+      : d));
+  };
+
+  // Module-level handlers
+  const addModule = (dayId, sectionId) => {
+    setDays(days.map(d => d.id === dayId
+      ? { ...d, sections: d.sections.map(s => s.id === sectionId
+          ? { ...s, modules: [...s.modules, newModule()] } : s) }
+      : d));
+  };
+  const removeModule = (dayId, sectionId, moduleId) => {
+    setDays(days.map(d => d.id === dayId
+      ? { ...d, sections: d.sections.map(s => s.id === sectionId
+          ? { ...s, modules: s.modules.filter(m => m.id !== moduleId) } : s) }
+      : d));
+  };
+  const moveModule = (dayId, sectionId, moduleId, dir) => {
+    setDays(days.map(d => {
+      if (d.id !== dayId) return d;
+      return { ...d, sections: d.sections.map(s => {
+        if (s.id !== sectionId) return s;
+        const idx = s.modules.findIndex(m => m.id === moduleId);
+        if (idx < 0) return s;
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= s.modules.length) return s;
+        const modules = [...s.modules];
+        [modules[idx], modules[newIdx]] = [modules[newIdx], modules[idx]];
+        return { ...s, modules };
+      }) };
+    }));
+  };
+  const updateModule = (dayId, sectionId, moduleId, patch) => {
+    setDays(days.map(d => d.id === dayId
+      ? { ...d, sections: d.sections.map(s => s.id === sectionId
+          ? { ...s, modules: s.modules.map(m => m.id === moduleId ? { ...m, ...patch } : m) } : s) }
+      : d));
+  };
+
+  const save = async () => {
+    setError(''); setProcessing(true);
+    try {
+      await updateCourseType(courseType.id, { plan: { days } });
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to save plan');
+      setProcessing(false);
+    }
+  };
+
+  const visibleFields = COURSE_PLAN_FIELDS.filter(f => visibleCols.includes(f.key));
+  const totalModules = days.reduce((sum, d) => sum + d.sections.reduce((s, sec) => s + sec.modules.length, 0), 0);
+
+  return (
+    <ModalShell onClose={() => !processing && onClose()} wide>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '6px', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <h3 className="display-font" style={{ margin: 0, fontSize: '24px' }}>
+            Course plan · <span style={{ color: BRAND.orange }}>{courseType.name}</span>
+          </h3>
+          <div style={{ marginTop: '4px', color: '#bbb', fontSize: '12px' }}>
+            {days.length} day{days.length === 1 ? '' : 's'} · {totalModules} module{totalModules === 1 ? '' : 's'}. Master template — copies will be made when courses are created from this type.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button onClick={setSimpleView} title="Show only essential columns"
+            style={{ background: 'transparent', color: '#bbb', border: `1px solid #555`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
+            Simple
+          </button>
+          <button onClick={setFullView} title="Show all columns"
+            style={{ background: 'transparent', color: '#bbb', border: `1px solid #555`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
+            Full
+          </button>
+          <button onClick={() => setShowColumnPicker(!showColumnPicker)}
+            style={{ background: showColumnPicker ? BRAND.orange : 'transparent', color: showColumnPicker ? BRAND.black : BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
+            Columns ({visibleCols.length}/{COURSE_PLAN_FIELDS.length})
+          </button>
+        </div>
+      </div>
+
+      {showColumnPicker && (
+        <div style={{ background: BRAND.black, border: `1px solid ${BRAND.orange}`, padding: '10px', marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {COURSE_PLAN_FIELDS.map(f => {
+            const isOn = visibleCols.includes(f.key);
+            return (
+              <button key={f.key} onClick={() => toggleCol(f.key)}
+                style={{ background: isOn ? BRAND.orange : 'transparent', color: isOn ? BRAND.black : BRAND.white, border: `1px solid ${isOn ? BRAND.orange : '#555'}`, padding: '3px 8px', cursor: 'pointer', fontSize: '10px', fontWeight: 700 }}>
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {days.length === 0 && (
+          <div style={{ padding: '30px', textAlign: 'center', color: '#666', fontStyle: 'italic', background: BRAND.black, border: `1px dashed #444` }}>
+            No days yet. Click "Add day" to start building the plan.
+          </div>
+        )}
+        {days.map((day, dayIdx) => (
+          <div key={day.id} style={{ background: BRAND.black, border: `1px solid #333`, borderTop: `3px solid ${BRAND.orange}` }}>
+            {/* Day header */}
+            <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', borderBottom: `1px solid #333` }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <button onClick={() => moveDay(day.id, -1)} disabled={dayIdx === 0}
+                  style={{ background: 'transparent', border: '1px solid #444', color: dayIdx === 0 ? '#444' : '#999', cursor: dayIdx === 0 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▲</button>
+                <button onClick={() => moveDay(day.id, 1)} disabled={dayIdx === days.length - 1}
+                  style={{ background: 'transparent', border: '1px solid #444', color: dayIdx === days.length - 1 ? '#444' : '#999', cursor: dayIdx === days.length - 1 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▼</button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Day</span>
+                <input type="number" value={day.dayNumber}
+                  onChange={(e) => updateDay(day.id, { dayNumber: parseInt(e.target.value) || 0 })}
+                  style={{ width: '60px', padding: '4px 6px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+              </div>
+              <input value={day.title} onChange={(e) => updateDay(day.id, { title: e.target.value })}
+                placeholder={day.dayNumber === 0 ? 'e.g. PRIOR TO START' : `Day ${day.dayNumber} title (optional)`}
+                style={{ flex: 1, minWidth: '200px', padding: '6px 10px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px', fontWeight: 700 }} />
+              <button onClick={() => removeDay(day.id)} title="Remove day"
+                style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+
+            {/* Sections */}
+            <div style={{ padding: '10px' }}>
+              {day.sections.length === 0 && (
+                <div style={{ fontSize: '11px', color: '#666', fontStyle: 'italic', padding: '8px 4px' }}>
+                  No sections. Add one to organise this day's modules.
+                </div>
+              )}
+              {day.sections.map((section, secIdx) => (
+                <div key={section.id} style={{ marginBottom: '12px', background: '#1a1a1a', border: `1px solid #2a2a2a` }}>
+                  <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: `1px solid #2a2a2a`, background: '#222' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <button onClick={() => moveSection(day.id, section.id, -1)} disabled={secIdx === 0}
+                        style={{ background: 'transparent', border: '1px solid #444', color: secIdx === 0 ? '#444' : '#999', cursor: secIdx === 0 ? 'default' : 'pointer', fontSize: '8px', padding: '1px 5px', lineHeight: 1 }}>▲</button>
+                      <button onClick={() => moveSection(day.id, section.id, 1)} disabled={secIdx === day.sections.length - 1}
+                        style={{ background: 'transparent', border: '1px solid #444', color: secIdx === day.sections.length - 1 ? '#444' : '#999', cursor: secIdx === day.sections.length - 1 ? 'default' : 'pointer', fontSize: '8px', padding: '1px 5px', lineHeight: 1 }}>▼</button>
+                    </div>
+                    <input value={section.title}
+                      onChange={(e) => updateSection(day.id, section.id, { title: e.target.value })}
+                      placeholder="Section title (e.g. 1. Welcome)"
+                      style={{ flex: 1, padding: '4px 8px', background: BRAND.black, border: `1px solid #444`, color: BRAND.yellow, fontFamily: 'inherit', fontSize: '12px', fontWeight: 700 }} />
+                    <button onClick={() => removeSection(day.id, section.id)} title="Remove section"
+                      style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                      onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                      <X size={13} />
+                    </button>
+                  </div>
+
+                  {/* Modules table */}
+                  {section.modules.length > 0 && (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                        <thead>
+                          <tr style={{ background: '#111' }}>
+                            <th style={{ padding: '6px 4px', textAlign: 'left', fontSize: '9px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap', width: '70px' }}>Order</th>
+                            {visibleFields.map(f => (
+                              <th key={f.key} style={{ padding: '6px 6px', textAlign: 'left', fontSize: '9px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap', minWidth: f.width }}>
+                                {f.label}
+                              </th>
+                            ))}
+                            <th style={{ padding: '6px 4px', textAlign: 'left', fontSize: '9px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap', width: '70px' }}>Links</th>
+                            <th style={{ padding: '6px 4px', textAlign: 'right', fontSize: '9px', color: '#999', textTransform: 'uppercase', whiteSpace: 'nowrap', width: '40px' }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {section.modules.map((mod, modIdx) => (
+                            <tr key={mod.id} style={{ borderTop: `1px solid #2a2a2a` }}>
+                              <td style={{ padding: '4px', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                                <button onClick={() => moveModule(day.id, section.id, mod.id, -1)} disabled={modIdx === 0}
+                                  style={{ background: 'transparent', border: '1px solid #333', color: modIdx === 0 ? '#444' : '#999', cursor: modIdx === 0 ? 'default' : 'pointer', fontSize: '8px', padding: '1px 4px', lineHeight: 1 }}>▲</button>
+                                <button onClick={() => moveModule(day.id, section.id, mod.id, 1)} disabled={modIdx === section.modules.length - 1}
+                                  style={{ background: 'transparent', border: '1px solid #333', color: modIdx === section.modules.length - 1 ? '#444' : '#999', cursor: modIdx === section.modules.length - 1 ? 'default' : 'pointer', fontSize: '8px', padding: '1px 4px', lineHeight: 1, marginLeft: '2px' }}>▼</button>
+                              </td>
+                              {visibleFields.map(f => (
+                                <td key={f.key} style={{ padding: '3px 4px', verticalAlign: 'top' }}>
+                                  <input value={mod[f.key] || ''}
+                                    onChange={(e) => updateModule(day.id, section.id, mod.id, { [f.key]: e.target.value })}
+                                    placeholder=""
+                                    style={{ width: '100%', minWidth: f.width - 12, padding: '4px 6px', background: BRAND.black, border: `1px solid #333`, color: BRAND.white, fontFamily: 'inherit', fontSize: '11px' }} />
+                                </td>
+                              ))}
+                              <td style={{ padding: '3px 4px', verticalAlign: 'top' }}>
+                                <button onClick={() => setEditingLinksFor({ dayId: day.id, sectionId: section.id, moduleId: mod.id })}
+                                  style={{ background: (mod.links || []).length > 0 ? BRAND.orange : 'transparent', color: (mod.links || []).length > 0 ? BRAND.black : BRAND.orange, border: `1px solid ${BRAND.orange}`, padding: '3px 6px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                  {(mod.links || []).length > 0 ? `${mod.links.length} 🔗` : '+ link'}
+                                </button>
+                              </td>
+                              <td style={{ padding: '3px 4px', textAlign: 'right', verticalAlign: 'top' }}>
+                                <button onClick={() => removeModule(day.id, section.id, mod.id)} title="Remove module"
+                                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '2px', display: 'inline-flex', alignItems: 'center' }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+                                  <X size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div style={{ padding: '6px 10px' }}>
+                    <button onClick={() => addModule(day.id, section.id)}
+                      style={{ background: 'transparent', color: BRAND.orange, border: `1px dashed ${BRAND.orange}`, padding: '4px 10px', cursor: 'pointer', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
+                      + Add module
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => addSection(day.id)}
+                style={{ background: 'transparent', color: BRAND.yellow, border: `1px dashed ${BRAND.yellow}`, padding: '4px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginTop: '4px' }}>
+                + Add section
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <button onClick={addDay}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 16px', cursor: 'pointer', fontWeight: 900, fontSize: '12px', textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center', gap: '6px', alignSelf: 'flex-start' }}>
+          <Plus size={14} /> Add day
+        </button>
+      </div>
+
+      {error && <div style={{ background: BRAND.red, color: BRAND.white, padding: '10px 12px', fontSize: '12px', marginTop: '12px' }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose} disabled={processing}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '12px' }}>
+          Cancel
+        </button>
+        <button onClick={save} disabled={processing}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '10px 20px', cursor: processing ? 'wait' : 'pointer', fontWeight: 900, textTransform: 'uppercase', fontSize: '12px' }}>
+          {processing ? 'Saving...' : 'Save plan'}
+        </button>
+      </div>
+
+      {editingLinksFor && (() => {
+        const day = days.find(d => d.id === editingLinksFor.dayId);
+        const section = day?.sections.find(s => s.id === editingLinksFor.sectionId);
+        const mod = section?.modules.find(m => m.id === editingLinksFor.moduleId);
+        if (!mod) return null;
+        return (
+          <ModuleLinksEditor module={mod}
+            onChange={(newLinks) => updateModule(editingLinksFor.dayId, editingLinksFor.sectionId, editingLinksFor.moduleId, { links: newLinks })}
+            onClose={() => setEditingLinksFor(null)} />
+        );
+      })()}
+    </ModalShell>
+  );
+}
+
+function ModuleLinksEditor({ module: mod, onChange, onClose }) {
+  const [links, setLinks] = useState(() => (mod.links || []).map(l => ({ ...l })));
+
+  const add = () => setLinks([...links, { id: `lnk_${Date.now()}_${links.length}`, label: '', url: '' }]);
+  const update = (i, field, value) => setLinks(links.map((l, j) => j === i ? { ...l, [field]: value } : l));
+  const remove = (i) => setLinks(links.filter((_, j) => j !== i));
+  const move = (i, dir) => {
+    const newIdx = i + dir;
+    if (newIdx < 0 || newIdx >= links.length) return;
+    const next = [...links];
+    [next[i], next[newIdx]] = [next[newIdx], next[i]];
+    setLinks(next);
+  };
+
+  const apply = () => {
+    // Validate URLs
+    for (const l of links) {
+      if (l.url.trim() && !/^https?:\/\//i.test(l.url.trim())) {
+        alert('Link URL must start with http:// or https://');
+        return;
+      }
+    }
+    onChange(links);
+    onClose();
+  };
+
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '20px' }}>Reference links</h3>
+      <div style={{ marginTop: '4px', color: '#bbb', fontSize: '12px' }}>
+        Optional URLs trainers can open from this module — Academy course, Confluence page, SharePoint doc, etc.
+      </div>
+
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {links.length === 0 && (
+          <div style={{ fontSize: '11px', color: '#666', fontStyle: 'italic', padding: '8px 0' }}>
+            No links yet.
+          </div>
+        )}
+        {links.map((l, i) => (
+          <div key={l.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 2fr auto', alignItems: 'center', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
+                style={{ background: 'transparent', border: '1px solid #444', color: i === 0 ? '#444' : '#999', cursor: i === 0 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▲</button>
+              <button type="button" onClick={() => move(i, 1)} disabled={i === links.length - 1}
+                style={{ background: 'transparent', border: '1px solid #444', color: i === links.length - 1 ? '#444' : '#999', cursor: i === links.length - 1 ? 'default' : 'pointer', fontSize: '9px', padding: '2px 6px', lineHeight: 1 }}>▼</button>
+            </div>
+            <input value={l.label} onChange={(e) => update(i, 'label', e.target.value)}
+              placeholder="Label (optional)"
+              style={{ width: '100%', padding: '6px 8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+            <input value={l.url} onChange={(e) => update(i, 'url', e.target.value)}
+              placeholder="https://..."
+              style={{ width: '100%', padding: '6px 8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }} />
+            <button type="button" onClick={() => remove(i)} title="Remove link"
+              style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+              onMouseEnter={(e) => e.currentTarget.style.color = BRAND.red}
+              onMouseLeave={(e) => e.currentTarget.style.color = '#666'}>
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={add}
+        style={{ background: 'transparent', color: BRAND.orange, border: `1px dashed ${BRAND.orange}`, padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginTop: '10px' }}>
+        + Add link
+      </button>
+
+      <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
+        <button onClick={onClose}
+          style={{ background: 'transparent', color: BRAND.white, border: `1px solid #555`, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, textTransform: 'uppercase', fontSize: '11px' }}>
+          Cancel
+        </button>
+        <button onClick={apply}
+          style={{ background: BRAND.orange, color: BRAND.black, border: 'none', padding: '8px 18px', cursor: 'pointer', fontWeight: 900, textTransform: 'uppercase', fontSize: '11px' }}>
+          Apply
+        </button>
       </div>
     </ModalShell>
   );
