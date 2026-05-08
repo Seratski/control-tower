@@ -42,6 +42,30 @@ const formatDate = (d) => {
   if (!d) return '';
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
+// E1: handles both Firestore Timestamp objects (with toDate()) and plain ISO strings.
+// Used for announcement createdAt and similar server-generated timestamps.
+const formatAnnouncementDate = (ts) => {
+  if (!ts) return '—';
+  try {
+    if (typeof ts === 'object' && typeof ts.toDate === 'function') {
+      return formatDate(ts.toDate());
+    }
+    return formatDate(ts);
+  } catch {
+    return '—';
+  }
+};
+const formatAnnouncementDateTime = (ts) => {
+  if (!ts) return '—';
+  try {
+    let d;
+    if (typeof ts === 'object' && typeof ts.toDate === 'function') d = ts.toDate();
+    else d = new Date(ts);
+    return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '—';
+  }
+};
 const daysSince = (dateStr) => {
   if (!dateStr) return null;
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24));
@@ -162,6 +186,7 @@ function Dashboard({ session, onLogout }) {
   const [courses, setCourses] = useState([]);
   const [upskills, setUpskills] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
+  const [users, setUsers] = useState([]);
   const [view, setView] = useState('overview');
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedSkill, setSelectedSkill] = useState(null);
@@ -184,11 +209,12 @@ function Dashboard({ session, onLogout }) {
     const unsubCourses = subscribeCourses(setCourses);
     const unsubUpskills = subscribeUpskills(setUpskills);
     const unsubAnnouncements = subscribeAnnouncements(setAnnouncements);
+    const unsubUsers = subscribeUsers(setUsers);
     const unsubAgents = subscribeAgents((list) => { setAgents(list); setLoading(false); });
     return () => {
       unsubSkills(); unsubAgents(); unsubTeams(); unsubTrainers();
       unsubRecruiters(); unsubRecruitments(); unsubCourseTypes(); unsubCourses();
-      unsubUpskills(); unsubAnnouncements();
+      unsubUpskills(); unsubAnnouncements(); unsubUsers();
     };
   }, []);
 
@@ -369,7 +395,7 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'course' && isAdmin && selectedCourse && (
           <CourseDetailView courseId={selectedCourse} courses={courses} courseTypes={courseTypes}
-            trainers={trainers} agents={agents} skills={skills} session={session}
+            trainers={trainers} agents={agents} skills={skills} users={users} session={session}
             onBack={() => setSelectedCourse(null)}
             onEnroll={() => setModal({ type: 'enrollAgents', courseId: selectedCourse })}
             onEdit={() => setModal({ type: 'editCourse', courseId: selectedCourse })}
@@ -399,7 +425,7 @@ function Dashboard({ session, onLogout }) {
         )}
         {view === 'upskill' && isAdmin && selectedUpskill && (
           <UpskillDetailView upskillId={selectedUpskill} upskills={upskills}
-            skills={skills} trainers={trainers} agents={agents} session={session}
+            skills={skills} trainers={trainers} agents={agents} users={users} session={session}
             onBack={() => setSelectedUpskill(null)}
             onAddAgents={() => setModal({ type: 'addUpskillAgents', upskillId: selectedUpskill })}
             onEdit={() => setModal({ type: 'editUpskill', upskillId: selectedUpskill })}
@@ -496,7 +522,7 @@ function Dashboard({ session, onLogout }) {
       {modal?.type === 'logTime' && (
         <TimeLogModal parentType={modal.parentType} parentId={modal.parentId}
           parentLabel={modal.parentLabel} parentMarket={modal.parentMarket} primaryTrainerId={modal.primaryTrainerId}
-          trainers={trainers} session={session}
+          trainers={trainers} users={users} session={session}
           onClose={() => setModal(null)} />
       )}
       {modal?.type === 'newAnnouncement' && (
@@ -527,7 +553,7 @@ function Dashboard({ session, onLogout }) {
       )}
 
       <footer style={{ borderTop: `1px solid ${BRAND.grey}`, padding: '20px 32px', marginTop: '60px', fontSize: '11px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-        <span>POWER · Control Tower v3.5.1 · Learning Unit · Nordic Customer Service</span>
+        <span>POWER · Control Tower v3.6 · Learning Unit · Nordic Customer Service</span>
         <span>{isAdmin ? 'Admin session' : 'Read-only session'}</span>
       </footer>
     </div>
@@ -888,7 +914,7 @@ function AnnouncementListView({ announcements, trainers, setSelectedAnnouncement
 
               <div style={{ paddingTop: '10px', borderTop: `1px solid #333`, fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#999', flexWrap: 'wrap', gap: '6px' }}>
                 <span>
-                  By {a.createdBy}
+                  Posted {formatAnnouncementDate(a.createdAt)} · By {a.createdBy}
                   {(a.bullets?.length > 0 || a.links?.length > 0) && (
                     <span style={{ marginLeft: '8px', color: '#666' }}>
                       {a.bullets?.length > 0 && <>· {a.bullets.length} {a.bullets.length === 1 ? 'point' : 'points'}</>}
@@ -914,6 +940,7 @@ function AnnouncementListView({ announcements, trainers, setSelectedAnnouncement
 }
 
 function AnnouncementDetailView({ announcementId, announcements, trainers, session, onBack, onEdit, onDelete }) {
+  const [copied, setCopied] = useState(false);
   const announcement = announcements.find(a => a.id === announcementId);
   if (!announcement) return null;
 
@@ -921,11 +948,57 @@ function AnnouncementDetailView({ announcementId, announcements, trainers, sessi
   const marketsList = announcement.markets || [];
   const completed = marketsList.filter(m => states[m]?.status === 'completed').length;
 
+  // E1: build a Teams-friendly text summary and copy to clipboard
+  const buildSummary = () => {
+    const lines = [];
+    lines.push(`📢 ${announcement.title}`);
+    lines.push(`Markets: ${marketsList.join(', ')}`);
+    lines.push('');
+    if (announcement.description) {
+      lines.push(announcement.description);
+      lines.push('');
+    }
+    if ((announcement.bullets || []).length > 0) {
+      lines.push('Key points:');
+      for (const b of announcement.bullets) lines.push(`• ${b.text}`);
+      lines.push('');
+    }
+    if ((announcement.links || []).length > 0) {
+      lines.push('Reference links:');
+      for (const l of announcement.links) {
+        lines.push(l.label ? `• ${l.label}: ${l.url}` : `• ${l.url}`);
+      }
+      lines.push('');
+    }
+    lines.push(`— posted by ${announcement.createdBy} in Control Tower`);
+    return lines.join('\n');
+  };
+
+  const handleCopySummary = async () => {
+    try {
+      await navigator.clipboard.writeText(buildSummary());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select and copy via temporary textarea
+      const ta = document.createElement('textarea');
+      ta.value = buildSummary();
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
         <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>← Back</button>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={handleCopySummary}
+            style={{ background: copied ? '#4ade80' : 'transparent', border: `1px solid ${copied ? '#4ade80' : BRAND.orange}`, color: copied ? BRAND.black : BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {copied ? '✓ Copied' : 'Copy for Teams'}
+          </button>
           <button onClick={onEdit} style={{ background: 'transparent', border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '6px 14px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Edit3 size={12} /> Edit
           </button>
@@ -945,7 +1018,7 @@ function AnnouncementDetailView({ announcementId, announcements, trainers, sessi
           </div>
           <h2 className="display-font" style={{ fontSize: '42px', margin: '4px 0 0', lineHeight: 1 }}>{announcement.title}</h2>
           <div style={{ fontSize: '13px', color: '#999', marginTop: '6px' }}>
-            By {announcement.createdBy} · <strong style={{ color: BRAND.orange }}>{completed}/{marketsList.length}</strong> markets completed
+            Posted {formatAnnouncementDate(announcement.createdAt)} by {announcement.createdBy} · <strong style={{ color: BRAND.orange }}>{completed}/{marketsList.length}</strong> markets completed
           </div>
         </div>
       </div>
@@ -1099,7 +1172,35 @@ function AnnouncementMarketCard({ announcementId, market, state, session }) {
         </button>
       )}
 
-      {state.lastUpdated && (
+      {/* E1: Status history */}
+      {(state.history || []).length > 0 && (
+        <div style={{ marginTop: '10px', borderTop: `1px solid #333`, paddingTop: '8px' }}>
+          <div style={{ fontSize: '9px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '4px' }}>
+            Status history
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            {(state.history || []).slice(-6).map((h, i) => (
+              <div key={i} style={{ fontSize: '10px', color: '#bbb', display: 'flex', justifyContent: 'space-between', gap: '6px' }}>
+                <span>
+                  <span style={{ color: announcementStatusColor(h.from) }}>{h.from}</span>
+                  <span style={{ color: '#666' }}> → </span>
+                  <span style={{ color: announcementStatusColor(h.to) }}>{h.to}</span>
+                </span>
+                <span style={{ color: '#666', fontSize: '9px' }}>
+                  {formatAnnouncementDateTime(h.at)} · {h.by}
+                </span>
+              </div>
+            ))}
+            {(state.history || []).length > 6 && (
+              <div style={{ fontSize: '9px', color: '#666', fontStyle: 'italic' }}>
+                Showing last 6 of {(state.history || []).length} changes
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {state.lastUpdated && !(state.history || []).length && (
         <div style={{ fontSize: '10px', color: '#666', marginTop: '10px', borderTop: `1px solid #333`, paddingTop: '6px' }}>
           Last updated by {state.lastUpdatedBy || 'Unknown'}
         </div>
@@ -1338,31 +1439,54 @@ function AnnouncementModal({ mode, announcementId, announcements, session, onClo
 
 /**
  * Subscribes to timeLogs subcollections for a list of (parentType, parentId) pairs
- * and returns a map of "type:id" -> total hours. Designed for ControlTowerView
- * where we need aggregated per-trainer hours across many active tasks.
+ * and returns:
+ *   - hoursByTask: { "type:id": totalHours }   (sum of all logs on that task)
+ *   - hoursByTrainer: { trainerId: totalHours } (counts primary AND co-trainer)
+ *
+ * E1: counts hours for both primary trainer and (if set) co-trainer.
+ * Observers are NOT counted.
  */
 function useAggregatedTimeLogs(taskRefs) {
-  const [hoursByTask, setHoursByTask] = useState({});
+  const [data, setData] = useState({ hoursByTask: {}, hoursByTrainer: {} });
 
   // Stable key for the effect: which tasks are we subscribing to?
   const refsKey = taskRefs.map(r => `${r.type}:${r.id}`).sort().join('|');
 
   useEffect(() => {
-    // Reset before re-subscribing so old totals don't linger
-    setHoursByTask({});
+    setData({ hoursByTask: {}, hoursByTrainer: {} });
     if (taskRefs.length === 0) return;
 
+    // Hold each task's logs separately so we can re-aggregate as new data streams in
+    const logsByTask = {};
+
+    const recompute = () => {
+      const hoursByTask = {};
+      const hoursByTrainer = {};
+      for (const [key, logs] of Object.entries(logsByTask)) {
+        let taskTotal = 0;
+        for (const l of logs) {
+          const h = l.hours || 0;
+          taskTotal += h;
+          if (l.trainerId) hoursByTrainer[l.trainerId] = (hoursByTrainer[l.trainerId] || 0) + h;
+          if (l.coTrainerId) hoursByTrainer[l.coTrainerId] = (hoursByTrainer[l.coTrainerId] || 0) + h;
+        }
+        hoursByTask[key] = taskTotal;
+      }
+      setData({ hoursByTask, hoursByTrainer });
+    };
+
     const unsubs = taskRefs.map(({ type, id }) => {
+      const key = `${type}:${id}`;
       return subscribeTimeLogs(type, id, (logs) => {
-        const total = logs.reduce((sum, l) => sum + (l.hours || 0), 0);
-        setHoursByTask(prev => ({ ...prev, [`${type}:${id}`]: total }));
+        logsByTask[key] = logs;
+        recompute();
       });
     });
     return () => unsubs.forEach(fn => fn && fn());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refsKey]);
 
-  return hoursByTask;
+  return data;
 }
 
 function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpToCourse, onJumpToUpskill }) {
@@ -1428,26 +1552,19 @@ function ControlTowerView({ trainers, courses, upskills, skills, agents, onJumpT
 
   const totalTasks = filteredCourses.length + filteredUpskills.length;
 
-  // C7: aggregate time logs across all currently filtered tasks
+  // C7/E1: aggregate time logs across all currently filtered tasks
   const taskRefs = useMemo(() => {
     return [
       ...filteredCourses.map(c => ({ type: 'course', id: c.id })),
       ...filteredUpskills.map(u => ({ type: 'upskill', id: u.id })),
     ];
   }, [filteredCourses, filteredUpskills]);
-  const hoursByTask = useAggregatedTimeLogs(taskRefs);
+  const { hoursByTask, hoursByTrainer } = useAggregatedTimeLogs(taskRefs);
 
-  // Total hours per trainer (sum of hours on all their currently-filtered tasks)
-  const hoursPerTrainer = useMemo(() => {
-    const map = {};
-    for (const c of filteredCourses) {
-      if (c.trainerId) map[c.trainerId] = (map[c.trainerId] || 0) + (hoursByTask[`course:${c.id}`] || 0);
-    }
-    for (const u of filteredUpskills) {
-      if (u.trainerId) map[u.trainerId] = (map[u.trainerId] || 0) + (hoursByTask[`upskill:${u.id}`] || 0);
-    }
-    return map;
-  }, [filteredCourses, filteredUpskills, hoursByTask]);
+  // E1: hoursPerTrainer is now driven by actual log entries (primary + co-trainer),
+  // not by attribution to whoever is the course's "primary trainer". This means
+  // co-trainers correctly get credit for sessions where they assisted.
+  const hoursPerTrainer = hoursByTrainer;
 
   const totalHoursLogged = Object.values(hoursByTask).reduce((sum, h) => sum + h, 0);
 
@@ -3150,6 +3267,12 @@ function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onN
                 <div style={{ color: '#bbb' }}>
                   <Briefcase size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
                   {trainer ? trainer.name : <em style={{ color: '#666' }}>No trainer</em>}
+                  {(c.assistTrainerIds || []).length > 0 && (
+                    <span title={(c.assistTrainerIds || []).map(id => trainers.find(t => t.id === id)?.name).filter(Boolean).join(', ')}
+                      style={{ marginLeft: '6px', padding: '1px 5px', background: BRAND.orange, color: BRAND.black, fontSize: '9px', fontWeight: 900, letterSpacing: '0.05em' }}>
+                      +{(c.assistTrainerIds || []).length}
+                    </span>
+                  )}
                 </div>
                 <div style={{ color: '#bbb' }}>
                   <Users size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px', color: BRAND.orange }} />
@@ -3171,7 +3294,7 @@ function CourseListView({ courses, courseTypes, trainers, setSelectedCourse, onN
 
 // ============ TIME LOGS (C5) ============
 
-function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers, session, onAddLog }) {
+function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers, users, session, onAddLog }) {
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState('');
 
@@ -3180,7 +3303,14 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
     return subscribeTimeLogs(parentType, parentId, setLogs);
   }, [parentType, parentId]);
 
-  const totalHours = logs.reduce((sum, l) => sum + (l.hours || 0), 0);
+  // E1: total counts each log's hours per trainer involved (primary + co-trainer)
+  // so this sum reflects "trainer-hours delivered", not just clock-time.
+  const totalTrainerHours = logs.reduce((sum, l) => {
+    const h = l.hours || 0;
+    const trainersOnLog = (l.trainerId ? 1 : 0) + (l.coTrainerId ? 1 : 0);
+    return sum + h * trainersOnLog;
+  }, 0);
+  const totalClockHours = logs.reduce((sum, l) => sum + (l.hours || 0), 0);
 
   const handleDelete = async (log) => {
     if (!confirm(`Delete this time log entry?\n\n${log.date} · ${log.hours}h${log.note ? ' · ' + log.note : ''}`)) return;
@@ -3193,6 +3323,10 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
   };
 
   const trainerName = (id) => (trainers || []).find(t => t.id === id)?.name;
+  const userName = (id) => {
+    const u = (users || []).find(x => x.id === id);
+    return u ? (u.displayName || u.username) : null;
+  };
 
   return (
     <div style={{ background: BRAND.grey, padding: '24px', border: `1px solid #333`, marginTop: '24px' }}>
@@ -3202,7 +3336,11 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
             Time logs
           </h3>
           <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
-            <span style={{ color: BRAND.orange, fontWeight: 700, fontSize: '14px' }}>{totalHours.toFixed(1)}h</span> total · {logs.length} {logs.length === 1 ? 'entry' : 'entries'}
+            <span style={{ color: BRAND.orange, fontWeight: 700, fontSize: '14px' }}>{totalClockHours.toFixed(1)}h</span> clock time
+            {totalTrainerHours !== totalClockHours && (
+              <> · <span style={{ color: BRAND.orange, fontWeight: 700 }}>{totalTrainerHours.toFixed(1)}h</span> trainer-hours</>
+            )}
+            {' · '}{logs.length} {logs.length === 1 ? 'entry' : 'entries'}
           </div>
         </div>
         {!isLocked && (
@@ -3227,6 +3365,8 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {logs.map(log => {
             const tName = log.trainerId ? trainerName(log.trainerId) : null;
+            const coName = log.coTrainerId ? trainerName(log.coTrainerId) : null;
+            const obsNames = (log.observerIds || []).map(userName).filter(Boolean);
             return (
               <div key={log.id}
                 style={{ background: BRAND.black, padding: '10px 12px', borderLeft: `3px solid ${BRAND.orange}`, fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
@@ -3240,11 +3380,23 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
                         {tName}
                       </span>
                     )}
+                    {coName && (
+                      <span style={{ fontSize: '11px', color: BRAND.white, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '9px', color: '#666' }}>+</span>
+                        <Briefcase size={10} color={BRAND.orange} />
+                        {coName}
+                      </span>
+                    )}
                     {!tName && log.trainerId && (
                       <span style={{ fontSize: '10px', color: '#666', fontStyle: 'italic' }}>(trainer not found)</span>
                     )}
                     <span style={{ fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>logged by {log.createdBy || 'Unknown'}</span>
                   </div>
+                  {obsNames.length > 0 && (
+                    <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                      Observed by: {obsNames.join(', ')}
+                    </div>
+                  )}
                   {log.note && (
                     <div style={{ fontSize: '12px', color: '#bbb', marginTop: '4px', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>{log.note}</div>
                   )}
@@ -3264,7 +3416,7 @@ function TimeLogsPanel({ parentType, parentId, parentStatus, isLocked, trainers,
   );
 }
 
-function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primaryTrainerId, trainers, session, onClose }) {
+function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primaryTrainerId, trainers, users, session, onClose }) {
   const todayIso = new Date().toISOString().split('T')[0];
   // Available trainers: market-filtered (D2: only trainers from the task's market)
   const availableTrainers = (trainers || []).filter(t => !parentMarket || t.market === parentMarket);
@@ -3273,12 +3425,26 @@ function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primary
     hours: '',
     note: '',
     trainerId: primaryTrainerId || '',
+    coTrainerId: '',
+    observerIds: [],
   });
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
+  const eligibleCoTrainers = availableTrainers.filter(t => t.id !== form.trainerId);
+  const eligibleObservers = (users || []).filter(u => true); // all users (admin + reader)
+  const selectedObservers = (users || []).filter(u => form.observerIds.includes(u.id));
+
+  const addObserver = (id) => {
+    if (form.observerIds.includes(id)) return;
+    setForm({ ...form, observerIds: [...form.observerIds, id] });
+  };
+  const removeObserver = (id) => {
+    setForm({ ...form, observerIds: form.observerIds.filter(x => x !== id) });
+  };
+
   const save = async () => {
-    if (!form.trainerId) { setError('Trainer is required'); return; }
+    if (!form.trainerId) { setError('Primary trainer is required'); return; }
     setError(''); setProcessing(true);
     try {
       await addTimeLog(parentType, parentId, {
@@ -3286,6 +3452,8 @@ function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primary
         hours: form.hours,
         note: form.note,
         trainerId: form.trainerId,
+        coTrainerId: form.coTrainerId || null,
+        observerIds: form.observerIds,
         createdBy: session.displayName,
       });
       onClose();
@@ -3318,8 +3486,9 @@ function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primary
       </div>
 
       <div style={{ marginTop: '12px' }}>
-        <FormLabel>Trainer who did the work *</FormLabel>
-        <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
+        <FormLabel>Primary trainer *</FormLabel>
+        <select value={form.trainerId}
+          onChange={(e) => setForm({ ...form, trainerId: e.target.value, coTrainerId: form.coTrainerId === e.target.value ? '' : form.coTrainerId })}
           style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }}>
           <option value="">— Pick a trainer —</option>
           {availableTrainers.map(t => (
@@ -3331,6 +3500,44 @@ function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primary
         {availableTrainers.length === 0 && parentMarket && (
           <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {parentMarket}</div>
         )}
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>Their hours WILL count toward training hours.</div>
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <FormLabel>Co-trainer (optional, also counts)</FormLabel>
+        <select value={form.coTrainerId} onChange={(e) => setForm({ ...form, coTrainerId: e.target.value })}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '13px' }}>
+          <option value="">— None —</option>
+          {eligibleCoTrainers.map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>Same hours WILL count for them too. Use when two trainers were teaching together.</div>
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <FormLabel>Observers (optional, do NOT count)</FormLabel>
+        {selectedObservers.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+            {selectedObservers.map(u => (
+              <span key={u.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: BRAND.black, border: `1px solid #555`, color: '#bbb', padding: '4px 8px', fontSize: '11px' }}>
+                {u.displayName || u.username}
+                <button type="button" onClick={() => removeObserver(u.id)} title="Remove"
+                  style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'inline-flex' }}>
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <select value="" onChange={(e) => { if (e.target.value) addObserver(e.target.value); }}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }}>
+          <option value="">+ Add observer...</option>
+          {eligibleObservers.filter(u => !form.observerIds.includes(u.id)).map(u => (
+            <option key={u.id} value={u.id}>{u.displayName || u.username}</option>
+          ))}
+        </select>
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>People who attended but weren't teaching (e.g. supervisors, observers).</div>
       </div>
 
       <div style={{ marginTop: '12px' }}>
@@ -3355,7 +3562,7 @@ function TimeLogModal({ parentType, parentId, parentLabel, parentMarket, primary
   );
 }
 
-function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, session, onBack, onEnroll, onEdit, onDelete, onLogTime, onJumpToAgent }) {
+function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, skills, users, session, onBack, onEnroll, onEdit, onDelete, onLogTime, onJumpToAgent }) {
   const course = courses.find(c => c.id === courseId);
   if (!course) return null;
 
@@ -3435,9 +3642,19 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
       </div>
 
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' }}>
-        <InfoPill icon={Briefcase} label="Trainer">
+        <InfoPill icon={Briefcase} label="Primary trainer">
           {trainer ? <span style={{ fontWeight: 700 }}>{trainer.name}</span> : <em style={{ color: '#666' }}>Not assigned</em>}
         </InfoPill>
+        {(course.assistTrainerIds || []).length > 0 && (
+          <InfoPill icon={Briefcase} label={`Assists (${(course.assistTrainerIds || []).length})`}>
+            <span style={{ fontWeight: 700 }}>
+              {(course.assistTrainerIds || [])
+                .map(id => trainers.find(t => t.id === id)?.name)
+                .filter(Boolean)
+                .join(', ')}
+            </span>
+          </InfoPill>
+        )}
         <InfoPill icon={Calendar} label="Start date">
           {course.startDate ? <span style={{ fontWeight: 700 }}>{formatDate(course.startDate)}</span> : <em style={{ color: '#666' }}>Not set</em>}
         </InfoPill>
@@ -3531,8 +3748,63 @@ function CourseDetailView({ courseId, courses, courseTypes, trainers, agents, sk
 
       <TimeLogsPanel parentType="course" parentId={courseId} parentStatus={course.status}
         isLocked={course.status === 'Completed' || course.status === 'Cancelled'}
-        trainers={trainers}
+        trainers={trainers} users={users}
         session={session} onAddLog={onLogTime} />
+    </div>
+  );
+}
+
+// E1: Reusable picker for selecting up to 3 assist trainers (excluding the primary).
+// Used in NewCourseModal and EditCourseModal.
+function AssistTrainerPicker({ available, primaryTrainerId, assistIds, onChange }) {
+  const MAX = 3;
+  const eligibleTrainers = available.filter(t => t.id !== primaryTrainerId && !assistIds.includes(t.id));
+  const addAssist = (id) => {
+    if (assistIds.length >= MAX) return;
+    onChange([...assistIds, id]);
+  };
+  const removeAssist = (id) => onChange(assistIds.filter(x => x !== id));
+
+  // If primary trainer was added as assist, drop it
+  useEffect(() => {
+    if (primaryTrainerId && assistIds.includes(primaryTrainerId)) {
+      onChange(assistIds.filter(x => x !== primaryTrainerId));
+    }
+  }, [primaryTrainerId]);
+
+  return (
+    <div>
+      <FormLabel>Assist trainers (optional, max {MAX})</FormLabel>
+      {assistIds.length === 0 ? (
+        <div style={{ fontSize: '11px', color: '#666', fontStyle: 'italic', marginBottom: '6px' }}>
+          No assists. Pick someone if multiple trainers will be teaching.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+          {assistIds.map(id => {
+            const t = available.find(x => x.id === id);
+            return (
+              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: BRAND.black, border: `1px solid ${BRAND.orange}`, color: BRAND.orange, padding: '4px 8px', fontSize: '11px', fontWeight: 700 }}>
+                {t ? t.name : '(unknown)'}
+                <button type="button" onClick={() => removeAssist(id)} title="Remove"
+                  style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'inline-flex' }}>
+                  <X size={11} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {assistIds.length < MAX && eligibleTrainers.length > 0 && (
+        <select value="" onChange={(e) => { if (e.target.value) addAssist(e.target.value); }}
+          style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit', fontSize: '12px' }}>
+          <option value="">+ Add assist trainer...</option>
+          {eligibleTrainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      )}
+      {assistIds.length >= MAX && (
+        <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>Maximum {MAX} assists reached.</div>
+      )}
     </div>
   );
 }
@@ -3544,6 +3816,7 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
     courseTypeId: preset?.courseTypeId || '',
     market: preset?.market || 'DK',
     trainerId: preset?.trainerId || '',
+    assistTrainerIds: preset?.assistTrainerIds || [],
     startDate: preset?.startDate || '',
     endDate: preset?.endDate || '',
     skillIds: preset?.skillIds || [],
@@ -3573,9 +3846,14 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
   const availableTrainers = trainers.filter(t => t.market === form.market);
 
   // If user changes market and the picked trainer is no longer in that market, clear the trainer
+  // E1: also clear any assists that no longer match the new market
   const handleMarketChange = (newMarket) => {
     const stillValid = trainers.find(t => t.id === form.trainerId && t.market === newMarket);
-    setForm({ ...form, market: newMarket, trainerId: stillValid ? form.trainerId : '' });
+    const validAssists = (form.assistTrainerIds || []).filter(id => {
+      const t = trainers.find(x => x.id === id);
+      return t && t.market === newMarket;
+    });
+    setForm({ ...form, market: newMarket, trainerId: stillValid ? form.trainerId : '', assistTrainerIds: validAssists });
   };
 
   const save = async () => {
@@ -3634,7 +3912,7 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
           </select>
         </div>
         <div>
-          <FormLabel>Trainer</FormLabel>
+          <FormLabel>Primary trainer</FormLabel>
           <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
             style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
             <option value="">— Unassigned —</option>
@@ -3642,6 +3920,12 @@ function NewCourseModal({ courseTypes, trainers, skills, onClose, preset }) {
           </select>
           {availableTrainers.length === 0 && <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {form.market}</div>}
         </div>
+      </div>
+
+      <div style={{ marginTop: '12px' }}>
+        <AssistTrainerPicker available={availableTrainers} primaryTrainerId={form.trainerId}
+          assistIds={form.assistTrainerIds}
+          onChange={(ids) => setForm({ ...form, assistTrainerIds: ids })} />
       </div>
 
       <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -3802,6 +4086,7 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
     description: course?.description || '',
     courseTypeId: course?.courseTypeId || '',
     trainerId: course?.trainerId || '',
+    assistTrainerIds: course?.assistTrainerIds || [],
     startDate: course?.startDate || '',
     endDate: course?.endDate || '',
     skillIds: course?.skillIds || [],
@@ -3854,7 +4139,7 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
           </select>
         </div>
         <div>
-          <FormLabel>Trainer</FormLabel>
+          <FormLabel>Primary trainer</FormLabel>
           <select value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}
             style={{ width: '100%', padding: '8px', background: BRAND.grey, border: `1px solid #444`, color: BRAND.white, fontFamily: 'inherit' }}>
             <option value="">— Unassigned —</option>
@@ -3862,6 +4147,15 @@ function EditCourseModal({ courseId, courses, courseTypes, trainers, skills, onC
           </select>
           {availableTrainers.length === 0 && <div style={{ fontSize: '10px', color: BRAND.yellow, marginTop: '4px' }}>No trainers in market {course.market}</div>}
         </div>
+      </div>
+
+      {/* E1: assist trainers — up to 3 */}
+      <div style={{ marginTop: '12px' }}>
+        <AssistTrainerPicker
+          available={availableTrainers}
+          primaryTrainerId={form.trainerId}
+          assistIds={form.assistTrainerIds}
+          onChange={(ids) => setForm({ ...form, assistTrainerIds: ids })} />
       </div>
 
       <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -4060,7 +4354,7 @@ function UpskillListView({ upskills, skills, trainers, setSelectedUpskill, onNew
   );
 }
 
-function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, session, onBack, onAddAgents, onEdit, onDelete, onLogTime, onJumpToAgent }) {
+function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, users, session, onBack, onAddAgents, onEdit, onDelete, onLogTime, onJumpToAgent }) {
   const upskill = upskills.find(u => u.id === upskillId);
   const [statusError, setStatusError] = useState('');
   const [removeError, setRemoveError] = useState('');
@@ -4212,7 +4506,7 @@ function UpskillDetailView({ upskillId, upskills, skills, trainers, agents, sess
 
       <TimeLogsPanel parentType="upskill" parentId={upskillId} parentStatus={upskill.status}
         isLocked={upskill.status === 'Completed' || upskill.status === 'Cancelled'}
-        trainers={trainers}
+        trainers={trainers} users={users}
         session={session} onAddLog={onLogTime} />
     </div>
   );
