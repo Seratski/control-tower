@@ -110,13 +110,14 @@ export function subscribeCourseTypes(callback) {
   const q = query(collection(db, 'courseTypes'), orderBy('name', 'asc'));
   return onSnapshot(q, (snap) => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
-export async function createCourseType({ name, description, defaultSkillIds }) {
+export async function createCourseType({ name, description, defaultSkillIds, plan }) {
   const cleanId = 'ct_' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const finalId = cleanId + '_' + Date.now().toString().slice(-4);
   await setDoc(doc(db, 'courseTypes', finalId), {
     name: name.trim(),
     description: (description || '').trim(),
     defaultSkillIds: defaultSkillIds || [],
+    plan: sanitizeCoursePlan(plan),
     createdAt: serverTimestamp(),
   });
   return finalId;
@@ -126,9 +127,63 @@ export async function updateCourseType(courseTypeId, updates) {
   if (updates.name !== undefined) cleanUpdates.name = updates.name.trim();
   if (updates.description !== undefined) cleanUpdates.description = (updates.description || '').trim();
   if (updates.defaultSkillIds !== undefined) cleanUpdates.defaultSkillIds = updates.defaultSkillIds;
+  if (updates.plan !== undefined) cleanUpdates.plan = sanitizeCoursePlan(updates.plan);
   await updateDoc(doc(db, 'courseTypes', courseTypeId), cleanUpdates);
 }
 export async function deleteCourseType(courseTypeId) { await deleteDoc(doc(db, 'courseTypes', courseTypeId)); }
+
+/**
+ * F1: Sanitize a course plan structure before writing to Firestore.
+ * Plan shape:
+ *   { days: [{ id, dayNumber, title, sections: [{ id, title, modules: [{ id, ...fields, links }] }] }] }
+ *
+ * Removes undefined values (Firestore rejects them), trims strings, ensures arrays.
+ */
+function sanitizeCoursePlan(plan) {
+  if (!plan || !Array.isArray(plan.days)) return { days: [] };
+  return {
+    days: plan.days.map(d => ({
+      id: d.id || `day_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      dayNumber: typeof d.dayNumber === 'number' ? d.dayNumber : 0,
+      title: (d.title || '').trim(),
+      sections: Array.isArray(d.sections) ? d.sections.map(s => ({
+        id: s.id || `sec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: (s.title || '').trim(),
+        modules: Array.isArray(s.modules) ? s.modules.map(m => sanitizeCourseModule(m)) : [],
+      })) : [],
+    })),
+  };
+}
+
+function sanitizeCourseModule(m) {
+  return {
+    id: m.id || `mod_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    placeToBe: (m.placeToBe || '').trim(),
+    training: (m.training || '').trim(),
+    academyCourseNo: (m.academyCourseNo || '').trim(),
+    academyCourseName: (m.academyCourseName || '').trim(),
+    academyMaterial: (m.academyMaterial || '').trim(),
+    academyInclQuiz: (m.academyInclQuiz || '').trim(),
+    pptTrainingMaterial: (m.pptTrainingMaterial || '').trim(),
+    pptMaterialCondition: (m.pptMaterialCondition || '').trim(),
+    task: (m.task || '').trim(),
+    description: (m.description || '').trim(),
+    duration: (m.duration || '').trim(),
+    responsible: (m.responsible || '').trim(),
+    performs: (m.performs || '').trim(),
+    status: (m.status || '').trim(),
+    moduleText: (m.moduleText || '').trim(),
+    moduleVideo: (m.moduleVideo || '').trim(),
+    cert: (m.cert || '').trim(),
+    links: Array.isArray(m.links) ? m.links
+      .map((l, i) => ({
+        id: l.id || `lnk_${Date.now()}_${i}`,
+        label: (l.label || '').trim(),
+        url: (l.url || '').trim(),
+      }))
+      .filter(l => l.url.length > 0) : [],
+  };
+}
 
 // ============ COURSES ============
 export function subscribeCourses(callback) {
